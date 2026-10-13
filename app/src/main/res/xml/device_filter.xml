@@ -1,0 +1,11 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!--
+  Фильтр устройств: PTP / Still Image — класс 6, подкласс 1, протокол 1.
+  Именно так камера Lumix объявляет себя в режиме тетеринга.
+-->
+<resources>
+    <usb-device
+        class="6"
+        subclass="1"
+        protocol="1" />
+</resources>

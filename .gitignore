@@ -1,0 +1,21 @@
+# Сборочный мусор
+build/
+.gradle/
+.kotlin/
+.cxx/
+
+# Готовые сборки: их место в разделе Releases, а не в истории репозитория
+*.apk
+*.aab
+
+# Локальная конфигурация: содержит путь к SDK конкретной машины
+local.properties
+
+# IDE
+.idea/
+*.iml
+captures/
+
+# ОС
+.DS_Store
+Thumbs.db
