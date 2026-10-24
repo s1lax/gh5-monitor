@@ -1,300 +1,104 @@
-# Lumix Monitor
+# GH5 Monitor
 
-Android-приложение: превращает смартфон или планшет в монитор и пульт для
-камеры **Panasonic Lumix S5**, подключённой **обычным USB-кабелем**.
+**An Android USB field monitor and remote control for the Panasonic Lumix GH5.**
 
-Карта захвата HDMI не нужна: приложение работает по протоколу PTP, который
-камера отдаёт по USB в режиме тетеринга.
+[![Android 8+](https://img.shields.io/badge/Android-8.0%2B-3DDC84)](#compatibility)
+[![License: MIT](https://img.shields.io/badge/License-MIT-blue.svg)](LICENSE)
+[![Build](https://github.com/s1lax/gh5-monitor/actions/workflows/android.yml/badge.svg)](https://github.com/s1lax/gh5-monitor/actions/workflows/android.yml)
 
----
+[Download APK](https://github.com/s1lax/gh5-monitor/releases/tag/v0.5.3) · [User guide](docs/USAGE.md) · [Compatibility & known issues](docs/COMPATIBILITY.md) · [Changelog](CHANGELOG.md)
 
-## Скачать
+Connect your GH5 to an Android phone with a USB data cable, select **PC(Tether)** on the camera, and use the phone as a larger monitor. No HDMI capture card, root access, or Wi-Fi camera connection is required.
 
-Готовый APK лежит в разделе **[Releases](../../releases/latest)** — это отдельная
-страница репозитория, в списке файлов его нет и быть не должно: там только
-исходники.
+Created and tested by **[s1lax](https://github.com/s1lax)**, developed with **GPT / OpenAI Codex**. This is a GH5-focused fork of [Lumix Monitor by velkilllmer](https://github.com/velkilllmer/lumix-USB-tether-monitor-android), with the original attribution and MIT license preserved.
 
-1. Откройте **[последний релиз](../../releases/latest)**.
-2. В блоке **Assets** скачайте `lumix-monitor-vN.apk`.
-3. Разрешите установку из неизвестных источников и откройте файл.
+> **Experimental, first public preview: 0.5.3-gh5.** The app has been tested with one GH5 and one phone, not a broad compatibility matrix. The current in-app labels are Russian; this repository's documentation is in English. Contributions for English UI localization are welcome.
 
-APK подписан отладочным ключом — тем же, что и все предыдущие версии, поэтому
-ставится **поверх** уже установленного приложения, удалять ничего не нужно.
+## What it can do
 
----
+| Area | Features |
+| --- | --- |
+| USB live view | Camera-advertised quality selection, JPEG preview, recovery after temporary interruptions, performance diagnostics |
+| Field monitor UI | Portrait and landscape layouts, large centered shutter control, clean view, independent tools that can be enabled together |
+| Focus | **Camera-native MF Assist**, remembered phone-selected area, navigator, hold-to-repeat movement and ±1× magnification; separate 1:1 display inspection and app focus peaking |
+| Exposure tools | Zebra, false color, histogram / RGB histogram, waveform and vectorscope, calculated from the USB preview |
+| Framing | Rule of thirds, center marker, aspect guides, safe area, camera level, image rotation and anamorphic desqueeze |
+| Viewing | Import `.cube` 3D LUTs, adjustable LUT strength, display-only EV / gamma / contrast correction |
+| Camera control | ISO, shutter, aperture, exposure compensation and WB through scrolling value selectors; AF, shutter, video REC / STOP, supported profile and video settings |
+| Camera status | Battery, recording state and timer, available exposure / AF / remaining-capacity data |
+| Files | Save the original USB preview JPEG; record a silent MP4 preview on the phone; browse recent camera stills and transfer original JPEG / RW2 files where supported |
+| Diagnosis | Capture matched photo/video preview stages with read-only camera parameters and export JPEG + PNG + JSON as a ZIP |
+| Demo | Local moving test scene without a camera |
 
-## Что уже работает
+Feature availability depends on camera state, lens, firmware and the values reported by the camera. A visible control is not a claim that every setting or format has been verified on hardware. See the [validation details](docs/VALIDATION.md).
 
-| Возможность | Состояние |
-|---|---|
-| Подключение камеры по USB (PTP) | готово |
-| Открытие сессии Panasonic | готово |
-| Приём liveview-кадра (JPEG) | готово |
-| Разбор метаданных кадра: уровень (крен/тангаж), гистограмма, ориентация | готово |
-| Полноэкранный liveview, интерфейс оверлеями по тапу | готово |
-| Выбор качества liveview из списка камеры | готово |
-| Максимальное качество по умолчанию, с проверкой и повтором | готово |
-| Автоперебор режимов живью (кнопка «Проверка живью») | готово |
-| Чтение настроек: режим, ISO, выдержка, диафрагма, EV, ББ, Photo Style | готово |
-| Соотношение сторон и формат снимка (fine/standard/RAW) | готово |
-| Режим и зона автофокуса | готово |
-| Перебор настроек по значениям, которые сообщила камера | готово |
-| Спуск затвора | готово |
-| Автофокус | готово |
-| Ручной фокус (ближе/дальше, 2 скорости) | готово |
-| Электронный уровень | готово |
-| Кадровые линии 2.39:1, безопасные зоны, центральный маркер | готово |
-| Переподключение без перетыкания кабеля | готово |
-| Автовосстановление, если кадры перестали приходить | готово |
-| Журнал диагностики прямо в приложении | готово |
-| Журнал переживает падение (дублируется в файл) | готово |
-| Тесты кодировок и разбора кадра | готово |
+## Install and connect
 
-### Чего камера не умеет по USB
+1. Download `GH5-Monitor-0.5.3.apk` from [Releases](https://github.com/s1lax/gh5-monitor/releases/tag/v0.5.3) and install it on Android.
+2. Connect the GH5 using a USB data cable / OTG connection. Enable OTG on your phone if required.
+3. Choose **PC(Tether)** on the GH5 and allow Android USB access.
+4. Open **GH5 Monitor**. If necessary, press **Подключить** (Connect).
 
-**Фокус по тапу экрана невозможен.** Проверено разбором структуры свойства
-`AF_AREA` (0x02000070): камера отдаёт его как пачку вложенных описаний
-`0x71`…`0x76`, и все они — переключатели режимов, а не координаты. Свойства
-с сеткой координат точки фокуса там нет. У Panasonic фокус по тапу есть только
-в Wi-Fi API (`cam.cgi`), а в режиме USB-тетеринга камера Wi-Fi выключает.
+The published APK is an **experimental debug-signed build**, the same tested 0.5.3 build used during development. Its SHA-256 is in the release's `SHA256SUMS.txt`. Independently built APKs normally use a different debug key and may not install over it. No private signing key is included in this repository.
 
-**Больше 1024×576 по USB камера не отдаёт.** Ноутбучная LUMIX Tether по USB
-тоже не умеет ни двигать точку фокуса, ни поднимать разрешение выше — это
-ограничение камеры, а не приложения.
+The debug build contains optional phone-camera diagnostic helpers and declares Android's CAMERA permission. They are not required for GH5 USB monitoring. The main manifest does not request Internet permission; the app has no built-in cloud upload or analytics. See [privacy and diagnostics](docs/PRIVACY.md).
 
-## Чего пока нет
+## Compatibility
 
-Это осознанно вынесено во второй этап — перечисленные инструменты требуют
-попиксельной обработки на GPU (OpenGL ES), а не отрисовки поверх картинки:
+**Hardware tested:** Panasonic **DC-GH5, firmware 2.6**, with a **OnePlus 8 Pro, Android 13**. The project targets Android 8.0+ with USB Host / OTG support; saving originals and exporting the comparison ZIP require Android 10+.
 
-- фокус-пикинг (focus peaking)
-- зебры
-- false color
-- waveform, вектроскоп
-- LUT (.cube) и де-сквиз анаморфота
-- запись потока в файл
+On the tested GH5, a selected `1280×960 @ 30 fps` live-view mode produced **1280×720 JPEGs** in the tested video configuration. Sustained preview was around **30 fps** after the USB stall fix. This is compressed tether preview: **4K USB live view is not implemented**, and a higher-resolution phone screen does not add source detail. End-to-end camera-to-display latency has not been measured.
 
-Гистограмма от камеры **разбирается, но не рисуется**: формат блока
-`0x17000003` не подтверждён на живой камере, а показывать непроверенные данные
-хуже, чем не показывать. Корректнее считать её из пикселей — это войдёт в
-GPU-этап.
+Other Lumix models, including the upstream project's S5 target, have **not** been validated with this GH5 fork. Please report your exact camera / firmware / phone combination rather than assuming compatibility.
 
----
+## Known limitations
 
-## Требования
+- Phone and GH5 LCD brightness can differ, particularly between photo and video modes. **The cause is unresolved.** Version 0.5.3 adds controlled comparison captures, not an automatic exposure or gamma fix. Scopes describe the received JPEG, not RAW exposure or guaranteed calibrated IRE.
+- Native MF Assist moves and magnifies the camera image before USB transmission. Its navigator shows the **last area requested by the phone**; physical GH5 joystick movements and the camera's remembered position are not read back.
+- Tap AF, motorized MF hold/release, RW2 transfer and the full set of video/profile settings still need broader hardware validation. JPEG original transfer and REC / STOP were checked on the development setup.
+- Backgrounding the app can interrupt USB. Recovery handles many temporary failures, but some sessions still require unplugging and reconnecting the camera. Camera hangs requiring a power cycle were reported during development; this has not been proven impossible in all states.
+- App overlays can coexist with any overlays already present in the received preview. Camera-side peaking / zebra availability should be checked on the actual camera and mode.
+- Phone MP4 recording is a preview proxy with no audio, not the GH5's internal recording or a 4K capture.
 
-- **Android 8.0 (API 26)** или новее, с поддержкой USB-хоста.
-- **Кабель USB-C → USB-C** (или OTG-переходник), поддерживающий передачу данных.
-  Кабели «только зарядка» не подойдут.
-- Камера в режиме **PC(Tether)**:
-  `Меню → USB → режим подключения → PC(Tether)`.
-  В режиме `PC(Storage)` камера не отвечает по PTP, и приложение её не увидит.
+## Build from source
 
----
+Use **JDK 17**, Android SDK **platform 34** and **build-tools 34.0.0**. Gradle 8.7, AGP 8.5.2 and Kotlin 2.0.21 are pinned by the project. Android Studio can open this repository directly.
 
-## Как это устроено
-
-```
-Lumix S5  ──USB──>  телефон
-    │                  │
-    │  PTP (bulk)      ├─ PtpUsbTransport   обмен контейнерами PTP
-    │  vendor opcodes  ├─ LumixCamera       команды Panasonic
-    │                  ├─ LiveviewLoop      цикл кадров
-    └─────────────────>└─ MonitorViewModel  состояние и UI
+```sh
+git clone https://github.com/s1lax/gh5-monitor.git
+cd gh5-monitor
+# Set ANDROID_HOME, or create an untracked local.properties with sdk.dir=...
+./gradlew testDebugUnitTest assembleDebug
 ```
 
-Приложение реализует вендорский протокол Panasonic поверх стандартного PTP.
-Ключевые opcodes: открытие сессии `0x9102`, включение liveview `0x9412`,
-получение кадра `0x9706`, свойства устройства `0x9108`/`0x9403`, спуск `0x9404`,
-автофокус `0x9405`, ручной фокус `0x9416`.
+On Windows, use `./gradlew.bat testDebugUnitTest assembleDebug` in PowerShell. Prefer an ASCII-only checkout path. The APK is generated at `app/build/outputs/apk/debug/app-debug.apk`.
 
-Полное описание протокола с кодами, кодировками значений и разбором формата
-кадра — в файле [`docs/lumix-protocol-reference.md`](docs/lumix-protocol-reference.md).
-Каждый факт там помечен уровнем достоверности: проверено на живой камере,
-вероятно по аналогии с другими моделями, или требует проверки.
+The project builds from the published source and normal Gradle dependencies. **No Panasonic SDK binaries or downloaded Panasonic documentation are needed or redistributed.** The Gradle wrapper JAR is included under its original [Apache-2.0 license](gradle/wrapper/LICENSE).
 
-### Структура исходников
+## How it works
 
-| Файл | Назначение |
-|---|---|
-| `ptp/Ptp.kt` | контейнеры PTP: сборка и разбор |
-| `ptp/PtpUsbTransport.kt` | обмен по USB bulk, сериализация транзакций |
-| `usb/LumixUsbConnector.kt` | поиск камеры, разрешение, открытие |
-| `lumix/LumixProps.kt` | opcodes, коды свойств, таблицы, кодировки |
-| `lumix/LumixCamera.kt` | драйвер камеры |
-| `lumix/LiveviewFrame.kt` | разбор кадра liveview |
-| `lumix/LiveviewLoop.kt` | цикл получения кадров |
-| `MonitorViewModel.kt` | состояние и операции |
-| `ui/MonitorScreen.kt` | интерфейс: полноэкранный liveview и оверлеи |
-
-### Решения, которые стоит знать
-
-**Транзакции PTP сериализованы.** Блокировка честная (`ReentrantLock(true)`):
-поток liveview не заморит поток настроек, после каждого кадра ожидающий поток
-получает шину. Без этого обмен перемешивается и поток разрушается.
-
-**Сессия открывается в два шага.** Камера **игнорирует вендорские команды, пока
-не открыта стандартная PTP-сессия**. Поэтому сначала отправляется стандартная
-`OpenSession` (0x1002) с номером сессии 1, и только затем вендорская Panasonic
-(0x9102). Без первого шага камера просто не отвечает — на этом ломалось первое
-подключение.
-
-**Перед первой командой камера НЕ сбрасывается.** В референсе перед началом
-обмена отправляется USB Still-Image «Device Reset Request» (`bRequest 0x66`) и
-снимается halt с эндпоинтов. **На Android это ломает подключение**: референс
-делает сброс после полного переподключения порта (`usb.reset()`), которого
-Android выполнить не может. Проверено на живой S5: без `0x66` и `clearHalt`
-соединение поднимается и живью идёт, с ними — первая запись не проходит.
-
-**События читаются с interrupt-эндпоинта**, а не с bulk, и в отдельном потоке.
-
-**Проверяется transaction ID.** Ответ с чужим ID означает рассинхронизацию
-канала: такой контейнер отбрасывается, а после нескольких подряд снимается
-halt. Это восстанавливает обмен вместо падения.
-
-**Запросы чтения выровнены до размера пакета** (1024 байта). Невыровненный
-последний пакет может привести к ошибке передачи.
-
-**Журнал диагностики ведётся в приложении.** Телефон занят камерой в
-единственном USB-порту, поэтому одновременно подключить его к компьютеру для
-`adb logcat` нельзя — журнал показывается на экране и доступен для копирования.
-
-**Журнал пишется ещё и в файл** — `files/ptp.log` во внутренней памяти
-приложения. Иначе падение стирало бы ровно то, что нужно для разбора. Забрать
-файл можно через `adb`:
-
-```powershell
-adb exec-out run-as com.lumixmonitor cat files/ptp.log > ptp.log
+```mermaid
+flowchart LR
+    GH5[GH5 in PC Tether mode] -->|USB PTP / JPEG| USB[Serialized USB transport]
+    USB --> Decode[JPEG parsing and latest-frame decoding]
+    Decode --> GL[OpenGL preview and monitor tools]
+    Decode --> Save[Original preview / diagnostics / proxy]
+    UI[Compose controls] -->|Camera commands| USB
 ```
 
-**Исключение в фоновом потоке не убивает приложение.** Android завершает **весь
-процесс** при необработанном исключении в любом потоке. Для приложения, которое
-держит USB-соединение с камерой в фоновых потоках, это означало потерю монитора
-из-за единичного сбоя обмена: поток чтения событий спит `Thread.sleep`, а при
-закрытии соединения он прерывается — `InterruptedException` уходил наверх и ронял
-процесс. Теперь тело потока целиком под `try/catch`, а в `LumixMonitorApp` стоит
-общий обработчик: исключение фонового потока попадает в журнал, поток
-завершается, приложение продолжает работать. Исключение в главном потоке
-по-прежнему уходит системному обработчику — ошибки интерфейса скрывать нельзя.
+The code keeps camera transactions serialized and limits pending frame work to avoid a growing preview queue. Camera-native MF Assist is different from digitally enlarging an already received 720p image. See the [developer notes](docs/DEVELOPMENT.md) and [protocol reference](docs/lumix-protocol-reference.md).
 
-**Один кадр в полёте.** Новый кадр не запрашивается, пока не пришёл предыдущий.
-На медленном USB иначе накапливаются запросы и поток разваливается.
+## Contribute
 
-**Декодирование вне критического пути.** Захват и декодирование JPEG идут в
-разных потоках. Если декодирование отстаёт, старый кадр выбрасывается, а не
-встаёт в очередь — побеждает новейший.
+Bug reports, compatibility results and pull requests are welcome. Start with [CONTRIBUTING.md](CONTRIBUTING.md). Useful next steps include broader camera testing, English UI localization, physical-camera focus-area readback, and the unresolved photo/video brightness comparison.
 
-**`DeviceBusy` — не ошибка.** Камера занята (например, автофокусом) — это
-нормальный ответ, цикл отступает на 200 мс и пробует снова.
+Please remove camera serial numbers, private network addresses and personal images before posting diagnostics. Do not upload the separately downloaded Panasonic SDK or its documentation.
 
-**Режим liveview не хардкодится, но порядок важен.** Приложение запрашивает у
-камеры список поддерживаемых режимов и ставит самый крупный. Делать это нужно
-**после запуска передачи**: до запуска камера записанный режим сбрасывает и
-отдаёт младший. Проверено автоперебором всех сочетаний — при обратном порядке
-вместо 1024×576 приходило 640×360. После записи режим читается обратно, и при
-расхождении запись повторяется (до трёх раз).
+## Credits and license
 
-**Камера режет живью под 16:9.** Из списка камеры 640×480, 832×624, 1024×768
-(все 4:3) реально приходят 640×360, 832×472, 1024×576. Соотношение сторон
-снимка на это не влияет: проверены 4:3, 3:2 и 16:9 — результат одинаковый.
-Итого предел USB-liveview у S5 — **1024×576 при 30 fps**.
+- **s1lax:** project direction, GH5 testing, usability feedback and this fork.
+- **GPT / OpenAI Codex:** AI-assisted implementation, investigation, documentation and test tooling, guided by s1lax. AI assistance does not imply independent certification or endorsement.
+- **velkilllmer:** the original [Lumix Monitor Android application](https://github.com/velkilllmer/lumix-USB-tether-monitor-android).
+- **Baku Hashimoto / [Tethr](https://github.com/baku89/tethr):** MIT-licensed Panasonic PTP reference work used by the upstream project.
 
----
-
-## Сборка
-
-### Важно: путь без кириллицы
-
-Android Gradle Plugin **отказывается собирать проект в пути с не-ASCII
-символами**, а также не рекомендуется сборка внутри папки, синхронизируемой
-OneDrive. Если проект лежит, например, в `C:\Users\имя\OneDrive\Рабочий стол\`,
-сборка упадёт с сообщением `Your project path contains non-ASCII characters`.
-
-Рабочее решение — собирать из ASCII-копии вне OneDrive, например
-`C:\LumixMonitor-build`, и переносить туда исходники.
-
-### Локальная сборка
-
-```powershell
-# 1. JDK 17 (обязателен для AGP 8.x)
-# 2. Android SDK: cmdline-tools + platform-tools + platforms;android-34 + build-tools;34.0.0
-
-# 3. Указать путь к SDK (вне репозитория, файл в .gitignore)
-"sdk.dir=C:/Android/sdk" | Set-Content local.properties
-
-# 4. Собрать
-.\gradlew.bat assembleDebug
-
-# APK: app\build\outputs\apk\debug\app-debug.apk
-```
-
-### Проверенные версии
-
-| Компонент | Версия |
-|---|---|
-| Android Gradle Plugin | 8.5.2 |
-| Gradle | 8.7 |
-| Kotlin | 2.0.21 |
-| compileSdk / targetSdk | 34 |
-| minSdk | 26 |
-| JDK | 17 |
-
-Связка намеренно консервативная и самосогласованная. Более новый AGP 9.x
-требует Gradle ≥ 9.6, build-tools ≥ 36 и других API-уровней — это отдельная
-миграция, и делать её одновременно с отладкой USB-протокола не стоит.
-
-### Тесты
-
-```powershell
-.\gradlew.bat testDebugUnitTest
-```
-
----
-
-## Ограничения и риски
-
-1. **Качество картинки.** USB-liveview — это сжатый JPEG-превью, а не чистый
-   HDMI: максимум **1024×576 при 30 fps**. Годится для кадрирования, контроля
-   экспозиции, уровня и удалённого управления. Для критичного контроля фокуса
-   и съёмки движения нужен HDMI→USB UVC, и это отдельный источник видео,
-   который стоит добавить позже как альтернативу.
-
-2. **Разрешение и частота живью измерены** на Panasonic DC-S5: 1024×576 при
-   30 fps, кадр 190–210 КБ. Задержка не измерялась. Список режимов приложение
-   запрашивает у камеры сама, поэтому на других моделях значения будут свои.
-
-3. **Смещения в формате кадра** проверены на живой S5: разбор кадра работает,
-   уровень и гистограмма извлекаются. Парсер при этом написан устойчиво — при
-   несовпадении структуры он не падает, а возвращает кадр без метаданных.
-
-4. **Нет вендорского SDK.** Panasonic не публикует SDK для потребительских
-   Lumix, всё построено на реверс-инжиниринге. Обновление прошивки камеры может
-   изменить поведение.
-
-5. **Питание.** Камера питается сама, поэтому просадок не ожидается, но
-   некачественный OTG-переходник может дать нестабильное соединение.
-
----
-
-## Источники и лицензии
-
-Протокол реализован по открытым источникам. Ключевой из них — проект
-**[Tethr](https://github.com/baku89/tethr)** (лицензия MIT): рабочий драйвер
-Panasonic S5 по USB PTP с liveview. Реализация на Kotlin написана самостоятельно
-по документированным фактам протокола (коды операций, структуры данных,
-кодировки значений); код Tethr не копировался.
-
-Дополнительно использованы:
-
-- **[pylumix](https://github.com/abichinger/pylumix)** — Wi-Fi путь (`cam.cgi`).
-- **[LumixController.js](https://github.com/davidkim9/LumixController)** — Wi-Fi путь.
-- **[libgphoto2](https://github.com/gphoto/libgphoto2)** (LGPL 2.1) — документация
-  протокола. Код не копировался и не линковался: LGPL-код в этот проект не входит.
-
-Приложение не является продуктом Panasonic и не связано с Panasonic.
-
-## Лицензия
-
-Проект распространяется по лицензии **MIT** — полный текст в файле
-[`LICENSE`](LICENSE), там же приведена лицензия Tethr, на работе которого
-основана реализация протокола.
+Distributed under **MIT**. Existing copyright and third-party notices are preserved in [LICENSE](LICENSE) and [THIRD_PARTY_NOTICES.md](THIRD_PARTY_NOTICES.md). This is an independent community project, not an official Panasonic or OpenAI product.

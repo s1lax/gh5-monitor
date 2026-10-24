@@ -19,6 +19,7 @@ import java.nio.ByteOrder
  * Все вызовы синхронные и блокирующие — вызывать только из фонового потока.
  */
 class LumixCamera(private val transport: PtpUsbTransport) {
+    val remote = LumixRemote(transport)
 
     /** Уведомление об изменении свойства на камере (в т.ч. дисками вручную). */
     var onDevicePropChanged: ((Int) -> Unit)? = null
@@ -43,14 +44,14 @@ class LumixCamera(private val transport: PtpUsbTransport) {
         transport.eventListener = { container ->
             when (container.code) {
                 LumixEvent.DEVICE_PROP_CHANGED -> {
-                    PtpLog.add("свойство изменилось: 0x%08X".format(container.firstParameter()))
+                    Log.d("LumixCamera", "свойство: 0x%08X".format(container.firstParameter()))
                     onDevicePropChanged?.invoke(container.firstParameter())
                 }
                 LumixEvent.OBJECT_ADDED -> {
                     PtpLog.add("новый файл: ${container.firstParameter()}")
                     onObjectAdded?.invoke(container.firstParameter())
                 }
-                else -> PtpLog.add("событие 0x%04X".format(container.code))
+                else -> if (container.code != 0xC107) PtpLog.add("событие 0x%04X".format(container.code))
             }
         }
 
@@ -159,7 +160,7 @@ class LumixCamera(private val transport: PtpUsbTransport) {
     fun close() {
         if (!sessionOpen) return
         try {
-            transport.sendCommand(
+            val response = transport.sendCommand(
                 opcode = LumixOp.CLOSE_SESSION,
                 parameters = intArrayOf(LumixParam.SESSION_ID),
                 expected = intArrayOf(
@@ -167,6 +168,12 @@ class LumixCamera(private val transport: PtpUsbTransport) {
                     PtpResponseCode.SESSION_NOT_OPEN,
                 ),
             )
+            PtpLog.add("Panasonic CloseSession -> ${PtpResponseCode.name(response.resCode)}")
+            val standard = transport.sendCommand(
+                opcode = PtpOp.CLOSE_SESSION,
+                expected = intArrayOf(PtpResponseCode.OK, PtpResponseCode.SESSION_NOT_OPEN),
+            )
+            PtpLog.add("Standard CloseSession -> ${PtpResponseCode.name(standard.resCode)}")
         } catch (t: Throwable) {
             PtpLog.add("CloseSession не удался: ${t.message}")
         } finally {
@@ -185,9 +192,9 @@ class LumixCamera(private val transport: PtpUsbTransport) {
         requireOk(response.resCode, "включение liveview")
     }
 
-    fun stopLiveview() {
-        try {
-            transport.sendCommand(
+    fun stopLiveview(): Boolean {
+        return try {
+            val response = transport.sendCommand(
                 opcode = LumixOp.LIVEVIEW,
                 parameters = intArrayOf(LumixParam.LIVEVIEW_STOP),
                 expected = intArrayOf(
@@ -195,8 +202,11 @@ class LumixCamera(private val transport: PtpUsbTransport) {
                     PtpResponseCode.DEVICE_BUSY,
                 ),
             )
+            PtpLog.add("StopLiveview -> ${PtpResponseCode.name(response.resCode)}")
+            response.resCode == PtpResponseCode.OK
         } catch (t: Throwable) {
             PtpLog.add("выключение liveview: ${t.message}")
+            false
         }
     }
 
@@ -326,6 +336,8 @@ class LumixCamera(private val transport: PtpUsbTransport) {
             opcode = LumixOp.GET_DEVICE_PROP_DESC,
             parameters = intArrayOf(propCode),
             maxBytes = PROP_DESC_MAX_BYTES,
+            // Observational polling must not block the stream with 30 busy retries.
+            expected = intArrayOf(PtpResponseCode.OK, PtpResponseCode.DEVICE_BUSY),
         )
         if (response.resCode != PtpResponseCode.OK) {
             PtpLog.add(
@@ -335,38 +347,7 @@ class LumixCamera(private val transport: PtpUsbTransport) {
             )
             return null
         }
-        val payload = response.data
-        if (payload.size < 12) return null
-
-        val bb = ByteBuffer.wrap(payload).order(ByteOrder.LITTLE_ENDIAN)
-        bb.int // devicePropCode
-        val headerLength = bb.int
-
-        // Смещение значения: headerLength выражен в 32-битных словах,
-        // плюс два слова заголовка (propCode и headerLength).
-        val valueOffset = headerLength * 4 + 8
-        if (valueOffset + valueSize > payload.size) return null
-
-        bb.position(valueOffset)
-        val current = readUnsigned(bb, valueSize)
-
-        // Дальше идёт счётчик значений, и только потом сам список. Без учёта
-        // счётчика в список попадал хвост структуры: у ISO после 51200 шли
-        // мусорные 33554466, 20, 20, 65537 — и перебор уезжал на них.
-        val countPosition = bb.position()
-        val count = if (bb.remaining() >= 2) readUnsigned(bb, 2) else 0
-        val fits = count in 1..MAX_ALLOWED_VALUES && count * valueSize <= bb.remaining()
-
-        if (fits) {
-            val allowed = IntArray(count) { readUnsigned(bb, valueSize) }
-            // Текущее значение обязано быть в списке. Если его там нет —
-            // формат понят неверно, и лучше прочитать по-старому.
-            if (allowed.contains(current)) return PropDesc(current = current, allowed = allowed)
-        }
-
-        bb.position(countPosition)
-        val fallback = IntArray(bb.remaining() / valueSize) { readUnsigned(bb, valueSize) }
-        return PropDesc(current = current, allowed = fallback)
+        return PropDescParser.parse(response.data, valueSize)
     }
 
     /** Устанавливает значение свойства. */
@@ -381,7 +362,7 @@ class LumixCamera(private val transport: PtpUsbTransport) {
         }
 
         val response = transport.sendData(
-            opcode = LumixOp.SET_DEVICE_PROP_VALUE,
+            opcode = RemoteSetting.writeOpcode(propCode),
             parameters = intArrayOf(propCode),
             payload = payload.array(),
             expected = intArrayOf(
@@ -398,13 +379,6 @@ class LumixCamera(private val transport: PtpUsbTransport) {
             return false
         }
         return true
-    }
-
-    private fun readUnsigned(bb: ByteBuffer, valueSize: Int): Int = when (valueSize) {
-        1 -> bb.get().toInt() and 0xFF
-        2 -> bb.short.toInt() and 0xFFFF
-        4 -> bb.int
-        else -> 0
     }
 
     // ------------------------------------------------- удобные установки
@@ -454,6 +428,20 @@ class LumixCamera(private val transport: PtpUsbTransport) {
         return response.resCode == PtpResponseCode.OK
     }
 
+    /** Separate start/stop commands; acceptance is NOT a recording-state report. */
+    fun movie(start:Boolean):Boolean = transport.sendCommand(
+        opcode=0x940C,parameters=intArrayOf(if(start)0x07000011 else 0x07000012),
+        expected=intArrayOf(PtpResponseCode.OK,PtpResponseCode.DEVICE_BUSY),
+    ).isOk
+
+    fun batteryLevel():Int? {
+        val response=transport.receiveData(opcode=0x1015,parameters=intArrayOf(0x5001),
+            maxBytes=64,timeoutMs=750,readAttempts=1,
+            expected=intArrayOf(PtpResponseCode.OK,PtpResponseCode.DEVICE_BUSY))
+        if(response.resCode!=PtpResponseCode.OK || response.data.size!=1)return null
+        return (response.data[0].toInt() and 255).takeIf{it in 0..100}
+    }
+
     /** Автофокус. */
     fun autoFocus(): Boolean {
         val response = transport.sendCommand(
@@ -498,6 +486,26 @@ class LumixCamera(private val transport: PtpUsbTransport) {
         return response.resCode == PtpResponseCode.OK
     }
 
+    /** Uses GH5's own MF Assist, without resizing the received JPEG on the phone. */
+    fun setNativeFocusAssist(enabled: Boolean): Boolean {
+        return setNativeFocusAssistAt(enabled,500,500)
+    }
+
+    fun setNativeFocusAssistAt(enabled: Boolean,x:Int,y:Int): Boolean {
+        val response = transport.sendData(
+            opcode = LumixOp.MANUAL_FOCUS_DRIVE,
+            parameters = intArrayOf(NativeFocusAssist.control(enabled)),
+            payload = NativeFocusAssist.payload(enabled,x,y),
+            expected = intArrayOf(
+                PtpResponseCode.OK, PtpResponseCode.DEVICE_BUSY,
+                PtpResponseCode.INVALID_PARAMETER, PtpResponseCode.ACCESS_DENIED,
+                PtpResponseCode.OPERATION_NOT_SUPPORTED,
+            ),
+        )
+        PtpLog.add("MF Assist GH5 ${if (enabled) "ON ($x, $y)" else "OFF"}: ${PtpResponseCode.name(response.resCode)}")
+        return response.isOk
+    }
+
     // ------------------------------------------------------------------ служебное
 
     private fun requireOk(resCode: Int, operation: String) {
@@ -532,10 +540,11 @@ class LumixCamera(private val transport: PtpUsbTransport) {
         private const val OPEN_SESSION_RETRY_DELAY_MS = 700L
 
         /** Верхняя граница кадра liveview — как в рабочем референсе. */
-        private const val LIVEVIEW_MAX_BYTES = 1_000_000
+        // A payload guard, not a target allocation. Larger experimental JPEGs
+        // must not fail solely because the original preview buffer was 1 MB.
+        private const val LIVEVIEW_MAX_BYTES = 8 * 1024 * 1024
 
         /** Разумный предел длины списка допустимых значений свойства. */
-        private const val MAX_ALLOWED_VALUES = 512
     }
 }
 

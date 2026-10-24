@@ -42,8 +42,8 @@ class LumixDeviceInfo(
  *   string DeviceVersion
  *   string SerialNumber
  *
- * Строка PTP — это один байт длины (в символах) и затем UTF-16LE без
- * завершающего нуля. Массив — это uint32 с количеством элементов, затем сами
+ * Строка PTP — это один байт длины (в символах) и затем UTF-16LE с
+ * завершающим нулём, включённым в длину. Массив — это uint32 с количеством элементов, затем сами
  * элементы по uint16.
  */
 object LumixDeviceInfoParser {
@@ -121,7 +121,7 @@ private class PtpReader(private val data: ByteArray) {
         requireBytes(characters * 2)
         val text = String(data, position, characters * 2, Charsets.UTF_16LE)
         position += characters * 2
-        return text
+        return text.trimEnd('\u0000')
     }
 
     /** Массив: uint32 с количеством, затем элементы по uint16. */

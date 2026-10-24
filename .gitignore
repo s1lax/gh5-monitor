@@ -1,21 +1,27 @@
-# Сборочный мусор
+# Build and tool output
 build/
 .gradle/
 .kotlin/
 .cxx/
-
-# Готовые сборки: их место в разделе Releases, а не в истории репозитория
 *.apk
 *.aab
 
-# Локальная конфигурация: содержит путь к SDK конкретной машины
+# Local configuration and signing material
 local.properties
+*.jks
+*.keystore
+keystore.properties
+.env
+.env.*
+!.env.example
 
-# IDE
+# Private debugging / camera captures
+*.log
+captures/
+preview-diagnosis/
+
+# IDE / OS
 .idea/
 *.iml
-captures/
-
-# ОС
 .DS_Store
 Thumbs.db

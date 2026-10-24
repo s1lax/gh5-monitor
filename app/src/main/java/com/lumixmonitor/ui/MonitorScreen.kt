@@ -6,6 +6,7 @@ import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
+import androidx.compose.foundation.layout.aspectRatio
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
@@ -60,6 +61,10 @@ import kotlin.math.min
 
 @Composable
 fun MonitorScreen(viewModel: MonitorViewModel) {
+    if(viewModel.isDemo || viewModel.connectionState is ConnectionState.Connected){
+        FieldMonitor(viewModel)
+        return
+    }
     Box(
         modifier = Modifier
             .fillMaxSize()
@@ -96,7 +101,7 @@ private fun ConnectScreen(viewModel: MonitorViewModel) {
         verticalArrangement = Arrangement.Center,
     ) {
         Text(
-            text = "Lumix Monitor",
+            text = "GH5 Monitor",
             style = MaterialTheme.typography.headlineMedium,
             fontWeight = FontWeight.SemiBold,
         )
@@ -170,9 +175,15 @@ private fun ConnectScreen(viewModel: MonitorViewModel) {
         }
 
         Spacer(Modifier.height(28.dp))
+        OutlinedButton(onClick = { viewModel.startDemo() }) { Text("Демо без камеры") }
         Row(horizontalArrangement = Arrangement.spacedBy(12.dp)) {
             OutlinedButton(onClick = { viewModel.reconnect() }) {
                 Text("Переподключиться")
+            }
+            if (state is ConnectionState.Connecting) {
+                TextButton(onClick = { viewModel.disconnect() }) {
+                    Text("Остановить")
+                }
             }
             OutlinedButton(
                 onClick = {
@@ -289,6 +300,14 @@ private fun TopOverlay(
                 fontSize = 11.sp,
                 maxLines = 1,
             )
+            if (viewModel.performanceText.isNotEmpty()) {
+                Text(
+                    text = viewModel.performanceText,
+                    color = Color.White.copy(alpha = 0.6f),
+                    fontSize = 10.sp,
+                    maxLines = 1,
+                )
+            }
         }
         // Кнопка качества видна всегда, даже если камера ещё не назвала режим.
         Box(
@@ -406,6 +425,10 @@ private fun BottomOverlay(viewModel: MonitorViewModel, modifier: Modifier = Modi
 
         ControlRow {
             ToolToggle(
+                "Трети",
+                viewModel.tools.showThirds,
+            ) { viewModel.updateTools { it.copy(showThirds = !it.showThirds) } }
+            ToolToggle(
                 "Уровень",
                 viewModel.tools.showLevel,
             ) { viewModel.updateTools { it.copy(showLevel = !it.showLevel) } }
@@ -433,7 +456,7 @@ private fun BottomOverlay(viewModel: MonitorViewModel, modifier: Modifier = Modi
  * Выбор качества liveview. Режимы сообщает сама камера.
  */
 @Composable
-private fun QualityDialog(viewModel: MonitorViewModel, onDismiss: () -> Unit) {
+internal fun QualityDialog(viewModel: MonitorViewModel, onDismiss: () -> Unit) {
     AlertDialog(
         onDismissRequest = onDismiss,
         title = { Text("Качество liveview") },
@@ -470,8 +493,8 @@ private fun QualityDialog(viewModel: MonitorViewModel, onDismiss: () -> Unit) {
 
                 Spacer(Modifier.height(12.dp))
                 Text(
-                    text = "Если камера оставляет 1024x768 — это её предел по USB. " +
-                        "Больше она отдаёт только через HDMI.",
+                    text = "Размер кадра в строке статуса — фактическое разрешение JPEG. " +
+                        "Режимы и максимальное качество зависят от модели камеры.",
                     style = MaterialTheme.typography.labelSmall,
                     color = MaterialTheme.colorScheme.onSurfaceVariant,
                 )
@@ -530,55 +553,77 @@ private fun VideoLayer(viewModel: MonitorViewModel) {
         return
     }
 
-    Image(
-        bitmap = bitmap.asImageBitmap(),
-        contentDescription = null,
-        modifier = Modifier.fillMaxSize(),
-        contentScale = ContentScale.Crop,
-    )
+    // Keep the complete camera frame. The phone is wider than 16:9; Crop used
+    // to cut off the top/bottom and made composition guides inaccurate.
+    Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
+        Box(Modifier.aspectRatio(bitmap.width.toFloat() / bitmap.height.toFloat())) {
+            Image(
+                bitmap = bitmap.asImageBitmap(),
+                contentDescription = null,
+                modifier = Modifier.fillMaxSize(),
+                contentScale = ContentScale.Fit,
+            )
 
-    val tools = viewModel.tools
+            val tools = viewModel.tools
 
-    Canvas(modifier = Modifier.fillMaxSize()) {
-        val centerX = size.width / 2f
-        val centerY = size.height / 2f
+            Canvas(modifier = Modifier.fillMaxSize()) {
+                val centerX = size.width / 2f
+                val centerY = size.height / 2f
 
-        if (tools.showFramelines) {
-            val guide = Color.White.copy(alpha = 0.35f)
-            // Кадр 2.39:1 внутри 16:9.
-            val targetHeight = size.width / 2.39f
-            if (targetHeight < size.height) {
-                val top = (size.height - targetHeight) / 2f
-                drawRect(
-                    color = guide,
-                    topLeft = Offset(0f, top),
-                    size = Size(size.width, targetHeight),
-                    style = Stroke(width = 2f),
-                )
+                if (tools.showThirds) {
+                    for (third in 1..2) {
+                        val x = size.width * third / 3f
+                        val y = size.height * third / 3f
+                        val verticalStart = Offset(x, 0f)
+                        val verticalEnd = Offset(x, size.height)
+                        val horizontalStart = Offset(0f, y)
+                        val horizontalEnd = Offset(size.width, y)
+                        // Dark outline keeps the grid visible on both bright and dark scenes.
+                        drawLine(Color.Black.copy(alpha = 0.55f), verticalStart, verticalEnd, 3.dp.toPx())
+                        drawLine(Color.Black.copy(alpha = 0.55f), horizontalStart, horizontalEnd, 3.dp.toPx())
+                        drawLine(Color.White.copy(alpha = 0.65f), verticalStart, verticalEnd, 1.dp.toPx())
+                        drawLine(Color.White.copy(alpha = 0.65f), horizontalStart, horizontalEnd, 1.dp.toPx())
+                    }
+                }
+
+                if (tools.showFramelines) {
+                    val guide = Color.White.copy(alpha = 0.35f)
+                    // Кадр 2.39:1 внутри 16:9.
+                    val targetHeight = size.width / 2.39f
+                    if (targetHeight < size.height) {
+                        val top = (size.height - targetHeight) / 2f
+                        drawRect(
+                            color = guide,
+                            topLeft = Offset(0f, top),
+                            size = Size(size.width, targetHeight),
+                            style = Stroke(width = 2f),
+                        )
+                    }
+                    // Безопасные зоны 90% и 80%.
+                    listOf(0.9f, 0.8f).forEach { factor ->
+                        val w = size.width * factor
+                        val h = size.height * factor
+                        drawRect(
+                            color = guide.copy(alpha = 0.22f),
+                            topLeft = Offset((size.width - w) / 2f, (size.height - h) / 2f),
+                            size = Size(w, h),
+                            style = Stroke(width = 1.5f),
+                        )
+                    }
+                }
+
+                if (tools.showCenterMarker) {
+                    val marker = Color.White.copy(alpha = 0.75f)
+                    val arm = min(size.width, size.height) * 0.03f
+                    drawLine(marker, Offset(centerX - arm, centerY), Offset(centerX + arm, centerY), 2f)
+                    drawLine(marker, Offset(centerX, centerY - arm), Offset(centerX, centerY + arm), 2f)
+                }
+
+                val roll = viewModel.levelRoll
+                if (tools.showLevel && roll != null) {
+                    drawLevel(roll, viewModel.levelPitch, centerX, centerY, size.minDimension)
+                }
             }
-            // Безопасные зоны 90% и 80%.
-            listOf(0.9f, 0.8f).forEach { factor ->
-                val w = size.width * factor
-                val h = size.height * factor
-                drawRect(
-                    color = guide.copy(alpha = 0.22f),
-                    topLeft = Offset((size.width - w) / 2f, (size.height - h) / 2f),
-                    size = Size(w, h),
-                    style = Stroke(width = 1.5f),
-                )
-            }
-        }
-
-        if (tools.showCenterMarker) {
-            val marker = Color.White.copy(alpha = 0.75f)
-            val arm = min(size.width, size.height) * 0.03f
-            drawLine(marker, Offset(centerX - arm, centerY), Offset(centerX + arm, centerY), 2f)
-            drawLine(marker, Offset(centerX, centerY - arm), Offset(centerX, centerY + arm), 2f)
-        }
-
-        val roll = viewModel.levelRoll
-        if (tools.showLevel && roll != null) {
-            drawLevel(roll, viewModel.levelPitch, centerX, centerY, size.minDimension)
         }
     }
 }

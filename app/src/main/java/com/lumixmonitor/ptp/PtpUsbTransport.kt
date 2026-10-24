@@ -49,8 +49,27 @@ class PtpUsbTransport(
     @Volatile
     private var closed = false
 
+    @Volatile private var transactionFailed = false
+    /** An interrupted data phase cannot be followed by another PTP command. */
+    val isSynchronized: Boolean get() = !transactionFailed
+
+    private fun transactionFailed(t: Throwable) {
+        if (!closed && !transactionFailed) {
+            transactionFailed = true
+            PtpLog.add("PTP: незавершённая транзакция; новые команды заблокированы (${t.message})")
+        }
+    }
+
     /** Буфер для чтения событий камеры. */
     private val eventBuffer = ByteArray(maxOf(endpointEvent?.maxPacketSize ?: 0, 1024))
+    private val bulkReader = PtpBulkReader(
+        packetSize = endpointIn.maxPacketSize,
+        transfer = { buffer, requested, timeout ->
+            ensureOpen()
+            connection.bulkTransfer(endpointIn, buffer, 0, requested, timeout)
+        },
+        onWait = { PtpLog.add(it) },
+    )
 
     /** Поток, читающий события камеры с interrupt-эндпоинта. */
     private var eventThread: Thread? = null
@@ -246,9 +265,9 @@ class PtpUsbTransport(
                         val container = PtpContainer(
                             header.type, header.code, header.transactionId, payload,
                         )
-                        PtpLog.add(
-                            "событие 0x%04X tid=%d".format(container.code, container.transactionId),
-                        )
+                        if (container.code != 0xC107 && container.code != 0xC102) {
+                            PtpLog.add("событие 0x%04X tid=%d".format(container.code, container.transactionId))
+                        }
                         eventListener?.invoke(container)
                     } catch (t: Throwable) {
                         PtpLog.add("событие: не разобрано (${t.message})")
@@ -265,36 +284,37 @@ class PtpUsbTransport(
     /**
      * Закрывает соединение.
      *
-     * Порядок важен: сначала останавливается поток событий и ожидается его выход,
-     * и только потом закрывается USB-соединение. Закрыть соединение, пока другой
-     * поток внутри bulkTransfer, нельзя — это гонка на уровне USB-стека.
-     * bulkTransfer не прерывается через interrupt, поэтому ожидание рассчитано
-     * на его таймаут.
+     * Сначала запрещаем новые транзакции. Затем ждём завершения текущего
+     * bulkTransfer под ioLock и потока событий, и только потом освобождаем USB.
+     * Флаг closed также запрещает повторы записи в сломанный канал.
      */
     fun close() {
         if (closed) return
         closed = true
 
-        val thread = eventThread
+        ioLock.lock()
         try {
-            thread?.interrupt()
-        } catch (_: Throwable) {
-            // поток уже завершён
-        }
-        if (thread != null && thread !== Thread.currentThread()) {
+            val thread = eventThread
             try {
-                thread.join(EVENT_THREAD_JOIN_MS)
-            } catch (_: InterruptedException) {
-                Thread.currentThread().interrupt()
+                thread?.interrupt()
+            } catch (_: Throwable) {
+                // поток уже завершён
             }
+            if (thread != null && thread !== Thread.currentThread()) {
+                try {
+                    thread.join(EVENT_THREAD_JOIN_MS)
+                } catch (_: InterruptedException) {
+                    Thread.currentThread().interrupt()
+                }
+            }
+            try {
+                connection.releaseInterface(usbInterface)
+            } finally {
+                connection.close()
+            }
+        } finally {
+            ioLock.unlock()
         }
-
-        try {
-            connection.releaseInterface(usbInterface)
-        } catch (_: Throwable) {
-            // интерфейс мог быть уже освобождён
-        }
-        connection.close()
     }
 
     // ----------------------------------------------------------------- операции
@@ -308,12 +328,14 @@ class PtpUsbTransport(
         readAttempts: Int = BULK_IN_READ_ATTEMPTS,
     ): PtpResponse {
         ioLock.lock()
+        var phaseIncomplete = false
         try {
-            verboseTransactions = opcode != LIVEVIEW_IMAGE_OPCODE
+            verboseTransactions = opcode != LIVEVIEW_IMAGE_OPCODE && opcode != 0x9108
             var attempt = 0
             while (true) {
                 attempt++
                 val tid = nextTransactionId()
+                phaseIncomplete = true
                 writeCommand(opcode, tid, parameters, timeoutMs)
                 val container = waitBulkIn(tid, COMMAND_MAX_BYTES, timeoutMs, readAttempts)
 
@@ -322,10 +344,14 @@ class PtpUsbTransport(
                         "ожидался ответ, получен тип ${container.type}",
                     )
                 }
+                phaseIncomplete = false
                 if (retryIfBusy(container.code, expected, attempt, opcode)) continue
 
                 return PtpResponse(container.code, container.parameters())
             }
+        } catch (t: Throwable) {
+            if (phaseIncomplete) transactionFailed(t)
+            throw t
         } finally {
             ioLock.unlock()
         }
@@ -341,12 +367,14 @@ class PtpUsbTransport(
         readAttempts: Int = BULK_IN_READ_ATTEMPTS,
     ): PtpResponse {
         ioLock.lock()
+        var phaseIncomplete = false
         try {
-            verboseTransactions = opcode != LIVEVIEW_IMAGE_OPCODE
+            verboseTransactions = opcode != LIVEVIEW_IMAGE_OPCODE && opcode != 0x9108
             var attempt = 0
             while (true) {
                 attempt++
                 val tid = nextTransactionId()
+                phaseIncomplete = true
                 writeCommand(opcode, tid, parameters, timeoutMs)
                 writeData(opcode, tid, payload, timeoutMs)
                 val container = waitBulkIn(tid, COMMAND_MAX_BYTES, timeoutMs, readAttempts)
@@ -354,10 +382,14 @@ class PtpUsbTransport(
                 if (container.type != PtpContainerType.RESPONSE) {
                     throw PtpException("ожидался ответ, получен тип ${container.type}")
                 }
+                phaseIncomplete = false
                 if (retryIfBusy(container.code, expected, attempt, opcode)) continue
 
                 return PtpResponse(container.code, container.parameters())
             }
+        } catch (t: Throwable) {
+            if (phaseIncomplete) transactionFailed(t)
+            throw t
         } finally {
             ioLock.unlock()
         }
@@ -372,18 +404,34 @@ class PtpUsbTransport(
         timeoutMs: Int = DEFAULT_TIMEOUT_MS,
         readAttempts: Int = BULK_IN_READ_ATTEMPTS,
     ): PtpDataResponse {
+        val queuedNs = System.nanoTime()
         ioLock.lock()
+        val acquiredNs = System.nanoTime()
+        var writeNs = 0L
+        var dataNs = 0L
+        var responseNs = 0L
+        var dataBytes = 0
+        var responseCode = 0
+        var phaseIncomplete = false
         try {
-            verboseTransactions = opcode != LIVEVIEW_IMAGE_OPCODE
+            verboseTransactions = opcode != LIVEVIEW_IMAGE_OPCODE && opcode != 0x9108
             var attempt = 0
             while (true) {
                 attempt++
                 val tid = nextTransactionId()
+                val writeStart = System.nanoTime()
+                phaseIncomplete = true
                 writeCommand(opcode, tid, parameters, timeoutMs)
+                val dataStart = System.nanoTime()
+                writeNs += dataStart - writeStart
                 val first = waitBulkIn(tid, maxBytes, timeoutMs, readAttempts)
+                dataNs += System.nanoTime() - dataStart
+                dataBytes = first.payload.size
+                responseCode = first.code
 
                 // Камера может ответить сразу, без фазы данных.
                 if (first.type == PtpContainerType.RESPONSE) {
+                    phaseIncomplete = false
                     if (retryIfBusy(first.code, expected, attempt, opcode)) continue
                     return PtpDataResponse(first.code, first.parameters(), ByteArray(0))
                 }
@@ -392,10 +440,14 @@ class PtpUsbTransport(
                     throw PtpException("ожидались данные, получен тип ${first.type}")
                 }
 
+                val responseStart = System.nanoTime()
                 val second = waitBulkIn(tid, COMMAND_MAX_BYTES, timeoutMs, readAttempts)
+                responseNs += System.nanoTime() - responseStart
+                responseCode = second.code
                 if (second.type != PtpContainerType.RESPONSE) {
                     throw PtpException("ожидался ответ после данных, получен ${second.type}")
                 }
+                phaseIncomplete = false
                 if (retryIfBusy(second.code, expected, attempt, opcode)) continue
 
                 if (opcode == LIVEVIEW_IMAGE_OPCODE && second.code == PtpResponseCode.OK) {
@@ -408,8 +460,19 @@ class PtpUsbTransport(
                 }
                 return PtpDataResponse(second.code, second.parameters(), first.payload)
             }
+        } catch (t: Throwable) {
+            if (phaseIncomplete) transactionFailed(t)
+            throw t
         } finally {
             ioLock.unlock()
+            val elapsedNs = System.nanoTime() - queuedNs
+            if (elapsedNs >= 100_000_000L) {
+                PtpLog.add(java.util.Locale.US.let { locale -> String.format(locale,
+                    "PTP SLOW op=0x%04X param=0x%08X total_ms=%.1f lock_ms=%.1f write_ms=%.1f data_ms=%.1f response_ms=%.1f bytes=%d result=0x%04X",
+                    opcode, parameters.firstOrNull() ?: 0, elapsedNs / 1e6,
+                    (acquiredNs - queuedNs) / 1e6, writeNs / 1e6, dataNs / 1e6,
+                    responseNs / 1e6, dataBytes, responseCode) })
+            }
         }
     }
 
@@ -457,6 +520,7 @@ class PtpUsbTransport(
             writeFullyOnce(data, timeoutMs)
             return
         } catch (e: PtpException) {
+            if (closed) throw e
             // Эндпоинт мог остаться в состоянии halt от предыдущей неудачной
             // операции: тогда камера не подтверждает приём и bulkTransfer
             // уходит в таймаут. CLEAR_FEATURE снимает halt, после чего запись
@@ -470,6 +534,7 @@ class PtpUsbTransport(
     private fun writeFullyOnce(data: ByteArray, timeoutMs: Int) {
         var offset = 0
         while (offset < data.size) {
+            ensureOpen()
             val written = connection.bulkTransfer(
                 endpointOut, data, offset, data.size - offset, timeoutMs,
             )
@@ -483,6 +548,7 @@ class PtpUsbTransport(
     }
 
     private fun writeCommand(opcode: Int, tid: Int, parameters: IntArray, timeoutMs: Int) {
+        ensureOpen()
         if (verboseTransactions) {
             PtpLog.add(
                 "> команда 0x%04X tid=%d параметров=%d".format(opcode, tid, parameters.size),
@@ -511,6 +577,7 @@ class PtpUsbTransport(
     ): PtpContainer {
         var mismatches = 0
         while (true) {
+            ensureOpen()
             val container = readContainer(maxBytes, timeoutMs, attempts)
 
             if (container.transactionId == expectedTid) {
@@ -559,71 +626,12 @@ class PtpUsbTransport(
      * Запросы выровнены до размера пакета: невыровненный последний пакет
      * может привести к ошибке передачи.
      */
-    private fun readContainer(maxBytes: Int, timeoutMs: Int, attempts: Int): PtpContainer {
-        val firstRequest = minOf(
-            BULK_IN_FIRST_REQUEST,
-            align(maxBytes + PtpContainer.HEADER_SIZE),
-        )
-        val first = ByteArray(firstRequest)
+    private fun readContainer(maxBytes: Int, timeoutMs: Int, attempts: Int): PtpContainer =
+        bulkReader.readContainer(maxBytes, timeoutMs, attempts)
 
-        // Первое чтение повторяется: после сброса PTP-автомата камера может
-        // ответить не с первой попытки. Если она молчит совсем, это видно по
-        // журналу — там будет столько строк, сколько было попыток.
-        var firstRead = -1
-        for (attempt in 1..attempts) {
-            firstRead = connection.bulkTransfer(endpointIn, first, 0, firstRequest, timeoutMs)
-            if (firstRead >= PtpContainer.HEADER_SIZE) break
-            PtpLog.add(
-                "чтение: попытка $attempt/$attempts — $firstRead байт за $timeoutMs мс",
-            )
-            if (closed) break
-        }
-        if (firstRead < PtpContainer.HEADER_SIZE) {
-            throw PtpTimeoutException(
-                "камера не ответила: $attempts попыток по $timeoutMs мс " +
-                    "(последнее чтение $firstRead байт)",
-            )
-        }
-
-        val header = PtpContainer.parseHeader(first)
-        if (header.length < PtpContainer.HEADER_SIZE ||
-            header.length > maxBytes + PtpContainer.HEADER_SIZE
-        ) {
-            // Показать сырые байты: если камера отвечает мусором, а не молчит,
-            // это видно только здесь.
-            val hex = first.take(16).joinToString(" ") { "%02X".format(it.toInt() and 0xFF) }
-            PtpLog.add("чтение: неразборчивый заголовок, первые байты: $hex")
-            throw PtpException(
-                "некорректная длина контейнера: ${header.length} (тип ${header.type}, код 0x%04X)"
-                    .format(header.code),
-            )
-        }
-
-        val totalLength = header.length
-        val payloadLength = totalLength - PtpContainer.HEADER_SIZE
-        val payload = ByteArray(payloadLength)
-
-        val firstPayload = (minOf(firstRead, totalLength) - PtpContainer.HEADER_SIZE)
-            .coerceAtLeast(0)
-        if (firstPayload > 0) {
-            System.arraycopy(first, PtpContainer.HEADER_SIZE, payload, 0, firstPayload)
-        }
-        var received = firstPayload
-
-        while (received < payloadLength) {
-            val remaining = payloadLength - received
-            val request = align(remaining)
-            val chunk = ByteArray(request)
-            val read = connection.bulkTransfer(endpointIn, chunk, 0, request, timeoutMs)
-            if (read <= 0) {
-                throw PtpException("чтение прервано на $received из $payloadLength")
-            }
-            val copy = minOf(read, remaining)
-            System.arraycopy(chunk, 0, payload, received, copy)
-            received += copy
-        }
-
-        return PtpContainer(header.type, header.code, header.transactionId, payload)
+    private fun ensureOpen() {
+        if (closed) throw PtpException("USB-соединение закрыто")
+        if (transactionFailed) throw PtpException("PTP-транзакция прервана; требуется переподключить USB")
     }
 
     /** Округление вверх до размера пакета. */
@@ -653,8 +661,13 @@ class PtpUsbTransport(
          */
         private const val EVENT_READER_ENABLED = true
 
-        /** Таймаут чтения события с interrupt-эндпоинта. */
-        private const val EVENT_TIMEOUT_MS = 500
+        /**
+         * Android 13 bulkTransfer pins its Java byte array across the blocking ioctl.
+         * A long interrupt read can therefore hold up GC and the next frame command.
+         * Poll briefly, then leave an unpinned gap (EVENT_POLL_PAUSE_MS).
+         * Keep draining events: disabling the endpoint can stall the camera itself.
+         */
+        private const val EVENT_TIMEOUT_MS = 10
 
         /** Пауза между попытками чтения, когда событий нет. */
         private const val EVENT_POLL_PAUSE_MS = 20L

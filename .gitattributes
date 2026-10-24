@@ -1,12 +1,8 @@
-# Единые переводы строк в репозитории независимо от системы
 * text=auto eol=lf
-
-# Windows-скрипты должны остаться с CRLF
 *.bat text eol=crlf
 *.cmd text eol=crlf
-
-# Двоичные файлы не трогаем
 *.jar binary
+*.bin binary
 *.png binary
 *.jpg binary
 *.webp binary

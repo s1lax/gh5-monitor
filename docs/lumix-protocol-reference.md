@@ -1,428 +1,62 @@
-# Panasonic Lumix S5 — справочник по протоколам управления и видеопотока
+# Panasonic USB PTP: implementation notes
 
-Документ для реализации Android-приложения «монитор + пульт» для Lumix S5.
-Составлен по исходникам открытых проектов, а не по догадкам. Каждый факт помечен
-уровнем достоверности.
+This English reference summarizes the operations used by the GH5 fork and supersedes the upstream S5-oriented conclusions where GH5 hardware showed different behavior. It is not a replacement for official camera documentation and does not claim model-independent support. The original upstream reference remains available in Git history.
 
-**Легенда достоверности:**
-- **[ПРОВЕРЕНО]** — взято из работающего открытого кода, который явно поддерживает S5.
-- **[ВЕРОЯТНО]** — взято из кода, но подтверждено на других моделях Lumix.
-- **[НЕИЗВЕСТНО]** — не найдено источника, требует проверки на реальной камере.
+## Sources and evidence
 
----
+- Original MIT Android application: [velkilllmer/lumix-USB-tether-monitor-android](https://github.com/velkilllmer/lumix-USB-tether-monitor-android).
+- MIT Panasonic PTP reference: [baku89/tethr](https://github.com/baku89/tethr).
+- [Panasonic's LUMIX Remote Control Library page](https://av.jpn.support.panasonic.com/support/global/cs/soft/tool/sdk.html), consulted separately during development; its downloaded SDK and documents are not redistributed.
+- Bounded property/status replies and physical checks on DC-GH5 firmware 2.6. See [validation](VALIDATION.md) for scope and gaps.
 
-## 1. Два независимых пути подключения
+The application speaks USB PTP directly with Android USB Host APIs. It does not use Wi-Fi `cam.cgi`, UVC capture, a Panasonic DLL or an HDMI adapter. Do not mix USB property groups with the separate Wi-Fi API.
 
-У S5 есть **два разных** протокола, и их легко перепутать. Они не взаимозаменяемы.
+## Transactions
 
-| | USB-кабель (PTP) | Wi-Fi (HTTP cam.cgi) |
-|---|---|---|
-| Физика | USB-C, USB Host на телефоне | Wi-Fi точка доступа камеры |
-| Управление | PTP vendor opcodes | HTTP GET запросы |
-| Liveview | PTP-кадры JPEG (bulk transfer) | UDP MJPEG-поток |
-| Нужен OTG | Да | Нет |
-| Источник | Tethr (MIT) | pylumix, LumixController.js |
+PTP command, data and response containers are length-checked and transaction IDs are verified. Camera operations share a serialized, fair transport lock. Data reads have explicit size/time bounds; an unsupported property or sentinel should not become a plausible UI value. See `ptp/PtpUsbTransport.kt` and `PtpBulkReader.kt` for the actual implementation.
 
-**Для требования «подключить по USB-кабелю и использовать как монитор» нужен путь PTP.**
-Он подтверждён рабочим кодом именно для S5.
+The session opens standard PTP OpenSession before the Panasonic vendor session. USB events are read separately from the interrupt endpoint. Reads and close/reopen work must not interleave with an in-flight bulk transaction.
 
-### Важное ограничение USB-пути
+| Operation | Use in this project |
+| --- | --- |
+| `0x1002` | Standard PTP OpenSession |
+| `0x9102` | Panasonic vendor session |
+| `0x9108` | Property descriptors / supported settings |
+| `0x9402`, `0x9403` | Read / write photo-setting groups |
+| `0x9408`, `0x9409` | Read / write movie-setting groups |
+| `0x9412`, `0x9706` | Live-view startup and frame acquisition |
+| `0x9404`, `0x9405` | Shutter and AF operations |
+| `0x9414` | Extended status / exposure groups |
+| `0x9416` | Extended camera controls, including native focus assist |
 
-USB-liveview — это **сжатый JPEG-превью**, а не чистый HDMI-поток. Это тот же по
-качеству поток, что видит LUMIX Tether на компьютере. Практические следствия:
+The source is authoritative for payload sizes, response handling and supported values. These codes are implementation facts, not permission to issue arbitrary unbounded commands.
 
-- Годится для: кадрирования, контроля экспозиции, удалённого управления, уровня,
-  гистограммы, точного фокуса по увеличению.
-- Не годится для: критичного контроля фокуса на мелких деталях, съёмки движения —
-  из-за сжатия и задержки.
-- Для полноценного монитора уровня Monitor+ нужен HDMI→USB UVC (см. §6).
+## Live-view parsing and quality
 
-Точные разрешение и FPS liveview **[НЕИЗВЕСТНО]** — но их можно и нужно узнать
-в рантайме командой `GetLiveviewSettings` (§4.4), которая возвращает список
-поддерживаемых режимов. Это правильный подход: не хардкодить значения.
+The parser extracts a bounded JPEG from the camera payload. It respects marker structure, checks data boundaries and tolerates unknown metadata. Camera level and other metadata are used only when available. The presentation path favors the newest frame instead of accumulating latency.
 
----
+The tested GH5 provides a nominal `1280×960 @ 30 fps` mode, while the tested video configuration sends `1280×720` JPEGs. The upstream S5 report of 1024×576 is not a GH5 limit. Conversely, the presence of USB-C does not establish a native 4K tether preview. Query modes, inspect actual JPEG dimensions and avoid inventing unsupported resolutions.
 
-## 2. USB PTP: транспорт
+## Native MF Assist
 
-**[ПРОВЕРЕНО]** Источник: `baku89/tethr`, `core/src/TethrPTPUSB/TethrPanasonic.ts`
-(лицензия MIT), а также `libgphoto2`.
+| Control group | Meaning / tested behavior |
+| --- | --- |
+| `0x03000051` | Assist START / STOP; explicit x/y coordinates are supplied at START |
+| `0x03000052` | Assist magnification; a protocol step of 100 produced approximately 1× on the tested GH5 |
+| `0x03000053` | Move assist area in the normalized 0–1000 coordinate system |
 
-### Определение камеры
+`FFFF` did not mean “restore the camera's last physical-button position” on this GH5; it started in a corner. Zero coordinates also selected a corner. An immediate MOVE after START could acknowledge without visibly applying. The app sends the saved phone-selected x/y in START and remembers later accepted phone requests.
 
-- Класс USB-интерфейса: **PTP / Still Image** — `bInterfaceClass = 0x06`,
-  `bInterfaceSubClass = 0x01`, `bInterfaceProtocol = 0x01`.
-- На Android: `UsbManager.deviceList` → фильтр по классу интерфейса, затем
-  `UsbDeviceConnection.claimInterface()` и `bulkTransfer()`.
-- Android **не** монтирует камеру как накопитель; нужен `android.hardware.usb.host`
-  и разрешение через `UsbManager.requestPermission()`.
+The exact magnified crop dimensions and the physical joystick's current position are not read back. The navigator must label its position as phone-selected, and must not pretend it is synchronized camera telemetry.
 
-### Формат контейнера команд PTP (USB)
+## Property and status groups
 
-Стандартный PTP-over-USB: 12-байтный заголовок, little-endian.
+Photo groups cover Photo Style, ISO, shutter, aperture, WB, EV, operating mode and preview-related settings. Movie settings occupy namespace `0x06` and use movie read/write operations; sending them with photo write `0x9403` is incorrect for this implementation.
 
-| Поле | Смещение | Размер | Значение |
-|---|---|---|---|
-| Length | 0 | 4 | полная длина контейнера включая заголовок |
-| Type | 4 | 2 | 1 = Command, 2 = Data, 3 = Response, 4 = Event |
-| Code | 6 | 2 | opcode |
-| TransactionID | 8 | 4 | сквозной счётчик транзакций |
-
-Заголовок Data-контейнера дополнительно содержит opcode (смещение 12) и
-TransactionID (смещение 16) — то есть 16-байтный заголовок.
+Extended `0x12` groups include recording state, time/capacity and available observed exposure values. Some numeric fields use unknown/unavailable sentinels. Descriptor parsing and model-specific fallbacks are implemented in `PanasonicData.kt`, `RemoteSetting.kt` and `CameraTelemetry.kt` and covered by fixture tests.
 
-Порядок обмена для команды с данными: Command → Data (при необходимости) →
-Response. Для команд, возвращающих данные: Command → Data (читаем) → Response.
-
-**[НЕИЗВЕСТНО]** точные bulk-эндпоинты для S5 — определяются в рантайме
-перебором `UsbEndpoint` по направлению (IN/OUT) и типу (BULK) на нужном интерфейсе.
-
----
-
-## 3. Panasonic PTP: opcodes и свойства
-
-**[ПРОВЕРЕНО]** Источник: Tethr `TethrPanasonic.ts`. Это вендорские коды Panasonic,
-отличающиеся от стандартных PTP.
-
-### Opcodes
-
-| Имя | Код | Параметры | Назначение |
-|---|---|---|---|
-| OpenSession | `0x9102` | `0x00010001` | открыть сессию |
-| CloseSession | `0x9103` | `0x00010001` | закрыть сессию |
-| GetDevicePropDesc | `0x9108` | propCode | описание свойства: текущее значение + список допустимых |
-| GetDevicePropValue | `0x9402` | propCode | только значение |
-| SetDevicePropValue | `0x9403` | propCode | установить значение (данные в Data-фазе) |
-| InitiateCapture | `0x9404` | `0x3000011` | спуск затвора |
-| CtrlLiveview | `0x9405` | `0x03000024` | автофокус |
-| Liveview | `0x9412` | `0x0d000010` старт / `0x0d000011` стоп | включить/выключить liveview |
-| GetLiveviewSettings | `0x9414` | см. §4.4 | текущий и рекомендуемые режимы |
-| SetLiveviewSettings | `0x9415` | см. §4.4 | сменить режим |
-| ManualFocusDrive | `0x9416` | `0x03010011` | ручная фокусировка |
-| LiveviewImage | `0x9706` | — | получить кадр liveview |
-
-`LiveviewImage` может вернуть `ResCode.DeviceBusy` — это **норма**, а не ошибка.
-Ожидаемые коды ответа: `OK` (0x2001) и `DeviceBusy` (0x2019). Максимальный размер
-ответа в референсе ограничен **1 000 000 байт**.
-
-### События
-
-| Имя | Код | Смысл |
-|---|---|---|
-| DevicePropChanged | `0xc102` | настройка изменилась (в т.ч. поворот диска руками) |
-| ObjectAdded | `0xc108` | появился новый файл после съёмки |
-
-`DevicePropChanged` — ключ к живой синхронизации UI: пользователь крутит диск на
-камере, приложение узнаёт об этом и обновляет интерфейс. Параметр события —
-изменившийся propCode.
-
----
-
-## 4. Свойства камеры (DevicePropCode)
-
-**[ПРОВЕРЕНО]** Значения и кодировки — из Tethr. Обратите внимание: Panasonic
-использует 32-битные коды, а не стандартные PTP-свойства.
-
-### 4.1. Основные свойства
-
-| Свойство | Код | Размер | Кодировка |
-|---|---|---|---|
-| ISO | `0x02000020` | 4 | чтение: `0xffffffff` = auto, `0xfffffffe` = i-ISO |
-| ISO_Param | `0x02000021` | 4 | запись: `0xffffffff` = auto, иначе число |
-| ShutterSpeed | `0x02000030` | 4 | чтение, см. ниже |
-| ShutterSpeed_Param | `0x02000031` | 4 | запись, см. ниже |
-| Aperture | `0x02000040` | 2 | значение / 10 (например 28 → f/2.8) |
-| Aperture_Param | `0x02000041` | 2 | `0` = auto, иначе `round(f * 10)` |
-| WhiteBalance | `0x02000050` | 2 | см. таблицу §4.2 |
-| WhiteBalance_Param | `0x02000051` | 2 | см. таблицу §4.2 |
-| WhiteBalance_KSet | `0x02000052` | 2 | температура в Кельвинах, напрямую |
-| Exposure | `0x02000060` | 2 | экспокоррекция, см. §4.3 |
-| Exposure_Param | `0x02000061` | 2 | экспокоррекция, см. §4.3 |
-| PhotoStyle | `0x02000010` | 2 | см. таблицу §4.2 |
-| PhotoStyle_Param | `0x02000011` | 2 | см. таблицу §4.2 |
-| CameraMode_ModePos | `0x02000082` | 2 | режим: P/A/S/M (только чтение) |
-| ImageMode_Quality | `0x02000a2` | 2 | см. §4.2 |
-| ImageMode_ImageAspect | `0x02000a3` | 2 | см. §4.2 |
-
-### 4.2. Таблицы значений
-
-**Режим экспозиции** (`CameraMode_ModePos`, только чтение — задаётся диском):
-
-| Код | Значение | Код | Значение |
-|---|---|---|---|
-| 0 | P | 8 | C1 |
-| 1 | A | 9 | C2 |
-| 2 | S | 10 | C3 |
-| 3 | M | 12 | S&Q |
-| 5 | video | 7 | iA |
-
-**Баланс белого** (`WhiteBalance`):
-
-| Код | Значение | Код | Значение |
-|---|---|---|---|
-| `0x0002` | auto | `0x800f` | shade |
-| `0x0004` | daylight | `0x8010`–`0x8013` | manual 1–4 |
-| `0x0005` | fluorescent | `0x8014` | auto cool |
-| `0x0006` | incandescent | `0x8015` | auto warm |
-| `0x0007` | flash | `0x8008` | cloud |
-
-**PhotoStyle** (`PhotoStyle`):
-
-| Код | Значение | Код | Значение |
-|---|---|---|---|
-| 0 | Standard | 40 | V-Log |
-| 1 | Vivid | 41 | Cinelike D2 |
-| 2 | Natural | 42 | Cinelike V2 |
-| 3 | Monochrome | 44 | L.Classic Neo |
-| 4 | Landscape | 45 | L.Monochrome S |
-| 5 | Portrait | 49 | Realtime LUT |
-| 14 | Like709 | 50 | LEICA Monochrome |
-| 15 | L.Monochrome | 18 | Flat |
-| 17 | L.Monochrome D | 19–22 | MY PHOTOSTYLE 1–4 |
-
-**Качество изображения** (`ImageMode_Quality`):
-0 = fine, 1 = standard, 2 = raw, 3 = raw+fine, 4 = raw+standard.
-
-**Соотношение сторон** (`ImageMode_ImageAspect`):
-1 = 4:3, 2 = 3:2, 3 = 16:9, 4 = 1:1, 10 = 65:24, 11 = 2:1.
-
-### 4.3. Кодировка выдержки и экспокоррекции
-
-**Выдержка** (`ShutterSpeed`, 4 байта) — неочевидная схема:
-
-*Чтение:*
-- `0xffffffff` → `bulb`
-- `0x0fffffff` → `auto`
-- если старший бит **0**: это дробь, значение = `1 / (value / 1000)`.
-  Пример: `value = 500` → `1/500`.
-- если старший бит **1**: это секунды, значение = `(value & 0x7fffffff) / 1000`.
-
-*Запись:*
-- `bulb` → `0xffffffff`
-- `auto` → `0x0ffffffe`
-- `1/N` → `N * 1000` (например `1/500` → `500000`)
-- секунды → `round(seconds * 1000) | 0x80000000`
-
-**Экспокоррекция** (`Exposure`, 2 байта): младшие биты — шаги по 1/3 EV,
-бит `0x8000` — знак «минус».
-- `0x0000` → `0`
-- `0x8000 | steps` → отрицательная, где `steps = digits * 3 + thirds`
-- Пример: `+1 1/3` → `0x0004`; `-2/3` → `0x8002`.
-
-### 4.4. Режимы liveview
-
-**`GetLiveviewSettings` (0x9414)** — параметр задаёт, что именно читаем:
-
-| Параметр | Смысл |
-|---|---|
-| `0xd800011` (`Liveview_TransImg`) | текущий активный режим |
-| `0xd800012` (`Liveview_RecomImg`) | список рекомендуемых режимов |
-
-Формат ответа для списка:
-
-```
-uint32  receivedPropCode
-uint32  dataSize
-uint16  settingsNum      // сколько режимов
-uint16  structSize
-// далее settingsNum записей по 8 байт:
-uint16  height
-uint16  width
-uint16  frameSize
-uint16  fps
-```
-
-Формат ответа для текущего режима — те же поля, но одна запись без списка.
-
-**`SetLiveviewSettings` (0x9415)** — запись режима:
-
-```
-uint32  Liveview_TransImg (0xd800011)
-uint32  8                  // размер структуры
-uint16  height
-uint16  width
-uint16  frameSize
-uint16  fps
-```
-
-**Практический вывод для приложения:** не хардкодить разрешение. При подключении
-вызвать `GetLiveviewSettings(0xd800012)`, получить список поддерживаемых режимов и
-предложить пользователю выбрать (либо автоматически взять максимальный).
-
----
-
-## 5. Кадр liveview: разбор формата
-
-**[ПРОВЕРЕНО]** Источник: Tethr `#getLiveviewImage()`. Ответ на `LiveviewImage`
-(`0x9706`) — не чистый JPEG, а контейнер с блоками метаданных.
-
-Первые 180 байт — последовательность блоков. Каждый блок:
-
-```
-uint32  id
-uint32  dataSize
-uint32  sessionID
-// далее dataSize байт полезной нагрузки
-```
-
-Известные id:
-
-| id | Содержимое | Пригодность для монитора |
-|---|---|---|
-| `0x17000001` | смещение JPEG в буфере (uint32 по offset+4) | **нужно** для извлечения кадра |
-| `0x17000002` | длина JPEG (предположительно) | не используется |
-| `0x17000003` | гистограмма: valid, samples, elems, затем данные | **готовый источник гистограммы!** |
-| `0x17000004` | положение камеры (posture) | ориентация кадра |
-| `0x17000005` | электронный уровень: roll, pitch (int16, /10) | **готовый уровень!** |
-
-JPEG извлекается как `data[jpegOffset:]`.
-
-### Что это даёт приложению бесплатно
-
-Два блока закрывают функциональность, которую иначе пришлось бы считать на GPU:
-
-1. **Гистограмма (`0x17000003`)** — камера сама присылает данные гистограммы.
-   Можно рисовать график без анализа пикселей.
-2. **Уровень (`0x17000005`)** — roll и pitch в десятых долях градуса. Готовый
-   электронный уровень с горизонта.
-
-Это существенное преимущество USB-пути перед картой захвата: там гистограмму и
-уровень пришлось бы вычислять самому.
-
-### Цикл получения кадров
-
-Из `LiveviewDriver.ts` — выверенные на практике правила, которые стоит повторить:
-
-- **Один кадр в полёте.** Не запрашивать новый кадр, пока не пришёл предыдущий,
-  иначе на медленном USB запросы накапливаются и поток разваливается.
-- **Декодирование вне критического пути.** Отдавать JPEG на декодирование
-  асинхронно и сразу запрашивать следующий кадр — декодирование перекрывается
-  с передачей по USB. Если декодирование отстаёт, старые кадры **выбрасывать**,
-  оставляя только новейший.
-- **Разная пауза при успехе и неудаче.** При пустом/неудачном кадре — пауза
-  ~200 мс, чтобы не крутиться вхолостую (камера занята при AF/съёмке).
-- **Глотать ошибки.** Ошибка получения кадра (обычно отключение кабеля) не должна
-  приводить к необработанному исключению; проверять состояние соединения.
-- **Не полагаться на событие «простой» транспорта.** Референс явно отмечает: при
-  появлении любого другого трафика (опрос настроек, съёмка, чтение файла) liveview
-  замирал навсегда. Нужен собственный самопланирующийся цикл.
-
----
-
-## 6. Альтернатива: HDMI → USB UVC (для качества монитора)
-
-Если нужен полноценный монитор, а не превью:
-
-- S5 отдаёт чистый HDMI через micro-HDMI.
-- Нужна карта захвата HDMI→USB (UVC), подключаемая к телефону через OTG.
-- Именно так работает Monitor+.
-- Даёт полное разрешение и низкую задержку, но **не даёт** ни гистограммы, ни
-  уровня от камеры — их надо считать на GPU.
-- Управление камерой при этом всё равно идёт по Wi-Fi (`cam.cgi`) или USB PTP.
-
-**Рекомендация по архитектуре:** сделать источник видео абстракцией с двумя
-реализациями (PTP-liveview и UVC), чтобы приложение работало и без карты захвата,
-и с ней. Это то, что отличает проект от Monitor+ — он умеет только UVC.
-
-**[НЕИЗВЕСТНО]** Поддерживает ли S5 (первое поколение) нативный UVC-режим веб-камеры.
-Известно, что он требует LUMIX Webcam Software на ПК. Модели S5 II / S5 IIX имеют
-встроенный USB-вебкамерный режим. Требует проверки на конкретной камере.
-
----
-
-## 7. Wi-Fi путь (резервный): HTTP cam.cgi
-
-**[ВЕРОЯТНО]** Источник: `abichinger/pylumix`, `davidkim9/LumixController`. Протокол
-приложения Image App; заявлена совместимость с «Image App capable» камерами.
-Наличие поддержки именно на S5 **[НЕИЗВЕСТНО]**, но LUMIX Sync для S5 существует.
-
-### Адреса
-
-| Назначение | Адрес |
-|---|---|
-| Управление | `http://192.168.54.1/cam.cgi` (порт 80) |
-| Файлы | `http://192.168.54.1:50001/` |
-| UPnP ContentDirectory | `http://192.168.54.1:60606/Server0/CDS_control` |
-
-### Сопряжение (обязательный первый шаг)
-
-```
-GET /cam.cgi?mode=accctrl&type=req_acc&value=<device_id>&value2=<device_name>
-```
-
-`device_id` — строка вида `4D454930-0100-1000-8001-020A0003BD13`. Первые 8 hex-знаков
-`4D454930` = ASCII `MEI0`. Значение, вероятно, можно генерировать, но **[НЕИЗВЕСТНО]**,
-требует ли камера уникальности. Ответ — XML с корнем `<camrply>`; признак успеха —
-`<result>ok</result>`. Периодически (раз в ~60 с) сопряжение нужно повторять.
-
-### Команды
-
-| Действие | Запрос |
-|---|---|
-| Перейти в режим съёмки | `?mode=camcmd&value=recmode` |
-| Перейти в режим просмотра | `?mode=camcmd&value=playmode` |
-| Спуск затвора | `?mode=camcmd&value=capture` |
-| Отмена спуска | `?mode=camcmd&value=capture_cancel` |
-| Начать запись видео | `?mode=camcmd&value=video_recstart` |
-| Остановить запись | `?mode=camcmd&value=video_recstop` |
-| Состояние (heartbeat) | `?mode=getstate` |
-| Прочитать настройку | `?mode=getsetting&type=<тип>` |
-| Записать настройку | `?mode=setsetting&type=<тип>&value=<значение>` |
-| Начать поток | `?mode=startstream&value=<udp_port>` |
-| Остановить поток | `?mode=stopstream` |
-| Информация о содержимом | `?mode=get_content_info` |
-
-Состояние: `<camrply><state><sd_access>on|off</sd_access></state></camrply>` —
-`sd_access = on` означает запись на карту. По переходу `on → off` определяется
-момент, когда снимок реально сохранён.
-
-Heartbeat: раз в ~1 секунду слать `getstate`; это же поддерживает жизнь UDP-потока.
-
-### Поток превью
-
-- `startstream` с номером UDP-порта; камера шлёт MJPEG-пакеты на этот порт.
-- Кадр собирается поиском маркеров JPEG: `FF D8` (начало) и `FF D9` (конец).
-- Типичный порт в референсах: `49152`.
-- **Разрешение и FPS [НЕИЗВЕСТНО]**, заведомо низкие.
-
-**[НЕИЗВЕСТНО]** точные имена `type=` для ISO, выдержки, диафрагмы. В CLI-примере
-упоминаются `iso` и `aperture`, но полного списка нет. Требует перебора на камере.
-
----
-
-## 8. Ограничения и риски
-
-1. **Разрешение USB-liveview неизвестно.** Первым делом в приложении — вызвать
-   `GetLiveviewSettings(0xd800012)` и показать реальный список. Это снимет
-   неопределённость без догадок.
-2. **Задержка USB-liveview.** Ожидаемо выше, чем у HDMI-карты; точное значение
-   измеряется только на устройстве. Влияет на пригодность для контроля фокуса.
-3. **Эндпоинты USB.** Точные номера bulk-эндпоинтов S5 не найдены в источниках;
-   определяются в рантайме.
-4. **Права USB на Android.** Нужен OTG, `android.hardware.usb.host`, диалог
-   разрешения. Некоторые телефоны не подают достаточного питания — **[НЕИЗВЕСТНО]**,
-   влияет ли это на S5 (у него собственное питание, так что, вероятно, нет).
-5. **Отсутствие вендорского SDK.** Panasonic не публикует SDK для потребительских
-   Lumix; всё построено на реверс-инжиниринге. Прошивки могут менять поведение.
-6. **Юридическое.** Tethr — MIT, портирование допустимо с сохранением упоминания.
-   libgphoto2 — LGPL 2.1: **код копировать нельзя**, но факты протокола
-   (коды операций, структуры) не охраняются авторским правом, и Tethr прямо
-   указывает, что не копировал код libgphoto2, а реализовал документированные факты.
-
----
-
-## 9. Источники
-
-- **Tethr** — `https://github.com/baku89/tethr`, MIT. Ключевой источник: рабочий
-  драйвер Panasonic S5 по USB PTP с liveview. Файлы: `core/src/TethrPTPUSB/TethrPanasonic.ts`,
-  `core/src/LiveviewDriver.ts`, `core/src/PTPDevice.ts`.
-- **pylumix** — `https://github.com/abichinger/pylumix`. Wi-Fi путь: `cam.cgi`,
-  UDP-поток, UPnP-браузинг.
-- **LumixController.js** — `https://github.com/davidkim9/LumixController`. Wi-Fi путь:
-  сопряжение, heartbeat, съёмка.
-- **libgphoto2** — `https://github.com/gphoto/libgphoto2`, LGPL 2.1. Документация
-  протокола, `camlibs/lumix/`.
-
-**Итог по достоверности:** разделы 2–5 (USB PTP, liveview, свойства) — проверены
-рабочим кодом для S5. Раздел 7 (Wi-Fi) — проверен на других моделях Lumix, для S5
-требует подтверждения.
+## Brightness diagnosis boundary
+
+The app's JPEG/GPU display path is shared between photo and video. That does not prove the camera generates identical previews or that its LCD has the same display transform. The GH5's video Luminance Level setting alone does not establish the encoding range of USB JPEG.
+
+Version 0.5.3 captures original JPEG + decoded PNG + camera/app state for separate photo/video stages. Do not infer signal range from one image's extrema, automatically expand 16–235, or claim a viewing correction changes sensor exposure. Camera LCD brightness, View Assist and video range are not automatically determined by the current diagnostic.

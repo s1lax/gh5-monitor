@@ -12,6 +12,7 @@ import androidx.activity.viewModels
 import androidx.core.content.IntentCompat
 import com.lumixmonitor.ui.LumixMonitorTheme
 import com.lumixmonitor.ui.MonitorScreen
+import java.io.File
 
 /**
  * Единственная Activity приложения.
@@ -43,9 +44,34 @@ class MainActivity : ComponentActivity() {
         handleUsbAttachIntent(intent)
     }
 
+    override fun onResume() {
+        super.onResume()
+        viewModel.onForeground()
+    }
+
+    override fun onPause(){viewModel.onBackground();super.onPause()}
+
     /** Если приложение открыли по факту подключения камеры — сразу подключаемся. */
     private fun handleUsbAttachIntent(intent: Intent?) {
         if (intent == null) return
+        if(BuildConfig.DEBUG && intent.getBooleanExtra("phone-camera-probe",false)){
+            runCatching {
+                Class.forName("com.lumixmonitor.PhoneCameraProbe").getMethod("capture",android.app.Activity::class.java).invoke(null,this)
+            }.onFailure{com.lumixmonitor.ptp.PtpLog.add("Phone camera probe: ${it.message}")}
+            return
+        }
+        if (BuildConfig.DEBUG && intent.hasExtra("usb-quality-probe")) {
+            viewModel.probeUsbQuality(intent.getStringExtra("usb-quality-probe") ?: "")
+            return
+        }
+        if(intent.getBooleanExtra("capture-probe",false)){viewModel.requestFrameProbe();return}
+        val reference=intent.getStringExtra("reference")
+        if(reference in listOf("display-reference.jpg","footage-reference.png")){
+            val file=File(filesDir,reference!!)
+            if(file.exists() && file.length()<8_000_000)viewModel.startDemo(file.readBytes())
+            return
+        }
+        if(intent.getBooleanExtra("demo",false)){viewModel.startDemo();return}
         val device = IntentCompat.getParcelableExtra(
             intent,
             UsbManager.EXTRA_DEVICE,

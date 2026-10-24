@@ -2,7 +2,16 @@ package com.lumixmonitor
 
 import android.app.Application
 import android.graphics.Bitmap
+import android.graphics.Canvas
+import android.graphics.Paint
+import android.net.Uri
+import android.content.ContentValues
+import android.os.Build
+import android.provider.MediaStore
 import android.hardware.usb.UsbDevice
+import android.os.Handler
+import android.os.Looper
+import android.os.SystemClock
 import android.util.Log
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
@@ -15,10 +24,26 @@ import com.lumixmonitor.lumix.LumixCodec
 import com.lumixmonitor.lumix.LumixProp
 import com.lumixmonitor.lumix.LumixTables
 import com.lumixmonitor.lumix.PropDesc
+import com.lumixmonitor.lumix.LatestPresentation
+import com.lumixmonitor.monitor.CubeLut
+import com.lumixmonitor.monitor.DemoFeed
+import com.lumixmonitor.monitor.Scopes
+import com.lumixmonitor.monitor.ScopeRaster
+import com.lumixmonitor.monitor.ScopeMath
+import com.lumixmonitor.monitor.ToolPreferences
+import com.lumixmonitor.monitor.ViewTransform
+import com.lumixmonitor.monitor.PreviewRecorder
+import com.lumixmonitor.monitor.DisplayCalibration
+import java.io.File
 import com.lumixmonitor.ptp.PtpLog
 import com.lumixmonitor.ptp.PtpUsbTransport
 import com.lumixmonitor.usb.LumixUsbConnector
 import java.util.concurrent.Executors
+import java.util.concurrent.TimeUnit
+import java.util.concurrent.ConcurrentHashMap
+import java.util.concurrent.CancellationException
+import java.util.concurrent.atomic.AtomicBoolean
+import java.util.concurrent.atomic.AtomicLong
 
 /** Состояние подключения к камере. */
 sealed interface ConnectionState {
@@ -53,7 +78,16 @@ data class MonitorTools(
     val showHistogram: Boolean = true,
     val showFramelines: Boolean = false,
     val showCenterMarker: Boolean = true,
+    val showThirds: Boolean = true,
     val desqueeze: Float = 1.0f,
+    val showWaveform: Boolean = false,
+    val showVectorscope: Boolean = false,
+    val rgbHistogram: Boolean = false,
+    val peakingThreshold: Float = 0.10f,
+    val guideAspect: Float = 2.39f,
+    val safeArea: Float = 0.9f,
+    val lutEnabled: Boolean = false,
+    val lutAmount: Float = 1f,
 )
 
 /**
@@ -95,10 +129,20 @@ enum class SettingKind(
 class MonitorViewModel(application: Application) : AndroidViewModel(application) {
 
     private val connector = LumixUsbConnector(application)
+    private val preferences = application.getSharedPreferences("monitor", 0)
+    private val mainHandler = Handler(Looper.getMainLooper())
+    private val generation = AtomicLong()
+    private val recovery = ConnectionRecovery()
+    private val settingsRefreshPending = AtomicBoolean()
+    @Volatile private var wantConnection = preferences.getBoolean("auto_reconnect", false)
+    @Volatile private var disposed = false
+    @Volatile private var permissionPending = false
 
     private var transport: PtpUsbTransport? = null
     private var camera: LumixCamera? = null
     private var liveview: LiveviewLoop? = null
+    @Volatile private var latestCameraJpeg: ByteArray? = null
+    private var heldCameraJpeg: ByteArray? = null
 
     /**
      * Разрешение последнего кадра — пишем в журнал только при смене.
@@ -108,18 +152,36 @@ class MonitorViewModel(application: Application) : AndroidViewModel(application)
     private var lastFrameSize: String? = null
 
     /** Время последнего перечитывания настроек: защита от флуда по USB. */
-    private var lastSettingsRefreshMs = 0L
+    private val pendingProperties = ConcurrentHashMap.newKeySet<Int>()
+    private val cachedProperties = mutableMapOf<Int, PropDesc>()
 
-    private val io = Executors.newSingleThreadExecutor { runnable ->
+    private val io = Executors.newSingleThreadScheduledExecutor { runnable ->
         Thread(runnable, "lumix-io")
     }
 
     // ------------------------------------------------------------- состояние
 
+    val remoteControl = RemoteCameraController(application, io, { camera }, { generation.get() },
+        { isCurrent(it) && !isDemo }, { text -> captureFeedback=text;statusText=text },
+        { cameraFocusAssist=false;cancelAssistSelection() })
+
+    val observedSettings: CameraSettings get() {
+        val t=remoteControl.telemetry
+        if(SystemClock.elapsedRealtime()-t.observedAtMs>4500)return settings.copy(aperture=if(settings.aperture=="f/0")"—" else settings.aperture)
+        return settings.copy(
+            iso=if(settings.iso.startsWith("auto") && t.actualIso!=null)"A ${t.actualIso}" else settings.iso,
+            aperture=t.actualAperture?.let{LumixCodec.formatAperture(it/10.0)} ?: if(settings.aperture=="f/0")"—" else settings.aperture,
+            shutter=t.actualShutter?.let{LumixCodec.decodeShutterSpeed(it)} ?: settings.shutter,
+        )
+    }
+
     var connectionState by mutableStateOf<ConnectionState>(ConnectionState.Disconnected)
         private set
 
     var frame by mutableStateOf<Bitmap?>(null)
+        private set
+
+    var performanceText by mutableStateOf("")
         private set
 
     var frameCount by mutableStateOf(0)
@@ -137,8 +199,98 @@ class MonitorViewModel(application: Application) : AndroidViewModel(application)
     var settings by mutableStateOf(CameraSettings())
         private set
 
-    var tools by mutableStateOf(MonitorTools())
+    var tools by mutableStateOf(ToolPreferences.load(preferences))
         private set
+
+    var isDemo by mutableStateOf(false)
+        private set
+    var heldFrame by mutableStateOf<Bitmap?>(null)
+        private set
+    val displayFrame: Bitmap? get() = heldFrame ?: frame
+    var scopes by mutableStateOf<Scopes?>(null)
+        private set
+    var scopeRaster by mutableStateOf<ScopeRaster?>(null)
+        private set
+    var viewTransform by mutableStateOf(ViewTransform())
+        private set
+    var nativePixels by mutableStateOf(false)
+        private set
+    var cameraFocusAssist by mutableStateOf(false)
+        private set
+    var focusAssistPending by mutableStateOf(false)
+        private set
+    var selectingAssist by mutableStateOf(false)
+        private set
+    private var pendingAssistPoint:Pair<Int,Int>?=null
+    var previewQuarterTurns by mutableStateOf(preferences.getInt("previewRotation",0).coerceIn(0,3))
+        private set
+    var capturePending by mutableStateOf(false)
+        private set
+    var captureFeedback by mutableStateOf("")
+        private set
+    var viewingLut by mutableStateOf<CubeLut?>(null)
+        private set
+    var cameraBattery by mutableStateOf<Int?>(null)
+        private set
+    var recordCommand by mutableStateOf("Статус записи GH5 не получен")
+        private set
+    var selectedPage by mutableStateOf(preferences.getString("page","frame") ?: "frame")
+        private set
+    var screenBrightness by mutableStateOf(preferences.getFloat("brightness",-1f))
+        private set
+    var displayCalibration by mutableStateOf(DisplayCalibration(
+        preferences.getBoolean("viewCorrection",false),
+        preferences.getFloat("viewEv",0f).coerceIn(-3f,3f),
+        preferences.getFloat("viewGamma",1f).coerceIn(.5f,2f),
+        preferences.getFloat("viewContrast",1f).coerceIn(.5f,1.5f)))
+        private set
+    private val featureIo=Executors.newSingleThreadExecutor { Thread(it,"monitor-tools") }
+    val previewDiagnosis=PreviewDiagnosisController(application,io,featureIo,{camera},{!disposed && !isDemo})
+    var neutralPreview by mutableStateOf(false)
+    val previewTools:MonitorTools get()=if(neutralPreview)tools.copy(lutEnabled=false,falseColor=false,focusPeaking=false,zebra=false) else tools
+    val previewCalibration:DisplayCalibration get()=if(neutralPreview)DisplayCalibration() else displayCalibration
+    fun capturePreviewDiagnosis(stage:String){
+        if(isDemo){statusText="Для сравнения нужна подключённая GH5";return}
+        val app=getApplication<Application>()
+        val state=org.json.JSONObject().put("version",BuildConfig.VERSION_NAME).put("cameraModel",cameraModel)
+            .put("neutralPreview",neutralPreview).put("calibrationEnabled",displayCalibration.enabled)
+            .put("viewEv",displayCalibration.ev).put("viewGamma",displayCalibration.gamma).put("viewContrast",displayCalibration.contrast)
+            .put("lutEnabled",tools.lutEnabled).put("lutTitle",viewingLut?.title ?: org.json.JSONObject.NULL).put("lutAmount",tools.lutAmount)
+            .put("peaking",tools.focusPeaking).put("zebra",tools.zebra).put("falseColor",tools.falseColor)
+            .put("heldFrameVisible",heldFrame!=null).put("nativeMfRequested",cameraFocusAssist).put("windowBrightness",screenBrightness)
+            .put("systemBrightnessMode",android.provider.Settings.System.getInt(app.contentResolver,android.provider.Settings.System.SCREEN_BRIGHTNESS_MODE,-1))
+            .put("systemBrightness",android.provider.Settings.System.getInt(app.contentResolver,android.provider.Settings.System.SCREEN_BRIGHTNESS,-1))
+        previewDiagnosis.capture(stage,state)
+    }
+    private val analysisBusy=AtomicBoolean()
+    private var lastAnalysisMs=0L
+    private val featureEpoch=AtomicLong()
+    private val lutEpoch=AtomicLong()
+    private var demoFeed:DemoFeed?=null
+    private var referenceRestore:Pair<MonitorTools,DisplayCalibration>?=null
+    private val frameProbeRequested=AtomicBoolean()
+    @Volatile private var previewRecorder:PreviewRecorder?=null
+    var proxyRecording by mutableStateOf(false)
+        private set
+    var proxyStatus by mutableStateOf("")
+        private set
+    private data class DemoSample(val bitmap:Bitmap,val roll:Float,val pitch:Float,val fps:Float,val epoch:Long)
+    private val demoMailbox=LatestPresentation<DemoSample>()
+    private val presentDemo=Runnable {
+        val sample=demoMailbox.take()
+        if(isDemo && sample!=null && featureEpoch.get()==sample.epoch){
+            frame=sample.bitmap;frameCount++;levelRoll=sample.roll;levelPitch=sample.pitch
+            actualFrameSize="${sample.bitmap.width}x${sample.bitmap.height}"
+            previewRecorder?.offer(sample.bitmap,System.nanoTime())
+            performanceText=String.format(java.util.Locale.US,"DEMO %.1f FPS",sample.fps)
+            analyseFrame()
+        }
+    }
+
+    init {
+        val file=File(getApplication<Application>().filesDir,"viewing.cube")
+        if(file.exists())featureIo.execute { try { val lut=file.reader().use{CubeLut.parse(it,file.name)};mainHandler.post{viewingLut=lut} } catch(t:Throwable){PtpLog.add("LUT не загружен: ${t.message}")} }
+    }
 
     var liveviewModes by mutableStateOf<List<LiveviewSetting>>(emptyList())
         private set
@@ -184,20 +336,23 @@ class MonitorViewModel(application: Application) : AndroidViewModel(application)
     // -------------------------------------------------------------- действия
 
     fun connect(device: UsbDevice) {
+        stopDemo()
+        recovery.observeDevice(device.deviceName)
+        if (recovery.requiresUsbChange) { statusText = USB_REPLUG_HINT; return }
         if (connectionState is ConnectionState.Connecting) return
+        if (connectionState is ConnectionState.Connected && lastDevice?.deviceName == device.deviceName) return
+        wantConnection = true
+        preferences.edit().putBoolean("auto_reconnect", true).apply()
+        val token = generation.incrementAndGet()
         connectionState = ConnectionState.Connecting
         lastError = null
         statusText = "Запрос доступа к USB…"
         lastDevice = device
         PtpLog.add("=== подключение: ${device.deviceName} ===")
 
-        connector.requestPermission(device) { granted ->
-            if (!granted) {
-                connectionState = ConnectionState.Failed("Доступ к USB не выдан")
-                statusText = "Доступ к USB не выдан"
-                return@requestPermission
-            }
-            io.execute { openCamera(device) }
+        io.execute {
+            releaseQuietly(graceful = true)
+            requestOpen(device, token)
         }
     }
 
@@ -208,51 +363,120 @@ class MonitorViewModel(application: Application) : AndroidViewModel(application)
      * сбрасывает состояние PTP и поднимает сессию и liveview заново.
      */
     fun reconnect() {
-        // Устройство ищется заново, а не берётся из сохранённого объекта: если
-        // камера переоткрылась — например, при смене USB-режима на самой камере
-        // или после сбоя, — сохранённый UsbDevice указывает на уже не
-        // существующее устройство, и обмен уходит в пустоту.
-        val device = connector.findPtpDevices().firstOrNull() ?: lastDevice
-        if (device == null) {
-            statusText = "Камера не найдена — проверьте кабель и режим PC(Tether)"
-            return
-        }
-        lastDevice = device
-        if (connectionState is ConnectionState.Connecting) return
-
+        stopDemo()
+        recovery.observeDevice(findCurrentDevice()?.deviceName)
+        if (recovery.requiresUsbChange) { statusText = USB_REPLUG_HINT; return }
+        wantConnection = true
+        preferences.edit().putBoolean("auto_reconnect", true).apply()
+        val token = generation.incrementAndGet()
+        permissionPending = false
         connectionState = ConnectionState.Connecting
         lastError = null
         statusText = "Переподключение…"
         PtpLog.add("=== переподключение ===")
-
         io.execute {
-            try {
-                releaseQuietly()
-                frame = null
-                frameCount = 0
-                levelRoll = null
-                levelPitch = null
-                histogram = null
-                activeLiveviewMode = null
-                liveviewModes = emptyList()
+            releaseQuietly(graceful = true)
+            if (!isCurrent(token)) return@execute
+            val device = findCurrentDevice()
+            if (device == null) {
+                statusText = "Ожидание камеры — вернитесь к съёмке на GH5"
+            } else requestOpen(device, token)
+        }
+    }
 
-                // Разрешение могло быть отозвано — тогда запрашиваем заново.
+    private fun isCurrent(token: Long) = !disposed && wantConnection && generation.get() == token
+
+    /** Never reuse a stale UsbDevice after the camera re-enumerates. */
+    private fun findCurrentDevice(): UsbDevice? {
+        val devices = connector.findPtpDevices()
+        val previous = lastDevice
+        if (previous == null) return devices.firstOrNull { it.vendorId == 0x04DA }
+        return devices.firstOrNull {
+            it.vendorId == previous.vendorId && it.productId == previous.productId
+        }
+    }
+
+    private fun requestOpen(device: UsbDevice, token: Long) {
+        if (!isCurrent(token)) return
+        recovery.attemptStarted(SystemClock.elapsedRealtime())
+        permissionPending = true
+        lastDevice = device
+        mainHandler.post {
+            if (!isCurrent(token)) return@post
+            try {
                 connector.requestPermission(device) { granted ->
+                    if (!isCurrent(token)) return@requestPermission
                     if (!granted) {
+                        permissionPending = false
+                        wantConnection = false
+                        preferences.edit().putBoolean("auto_reconnect", false).apply()
                         connectionState = ConnectionState.Failed("Доступ к USB не выдан")
                         statusText = "Доступ к USB не выдан"
-                    } else {
-                        io.execute { openCamera(device) }
+                    } else io.execute {
+                        if (isCurrent(token)) openCamera(device, token)
                     }
                 }
             } catch (t: Throwable) {
-                PtpLog.add("переподключение не удалось: $t")
-                lastError = t.message
-                connectionState = ConnectionState.Failed(t.message ?: "Ошибка переподключения")
-                statusText = "Ошибка переподключения"
+                if (isCurrent(token)) {
+                    permissionPending = false
+                    connectionState = ConnectionState.Failed("Камера временно недоступна")
+                    statusText = "Ожидание камеры; повторное подключение автоматически"
+                    PtpLog.add("запрос USB-доступа: ${t.message}")
+                }
             }
         }
     }
+
+    /** Serialized with all open/close operations: a failed old session cannot close a new one. */
+    private fun checkConnectionHealth() {
+        if (disposed || !wantConnection) return
+        val device = findCurrentDevice()
+        recovery.observeDevice(device?.deviceName)
+        if (permissionPending) {
+            if (device == null) {
+                generation.incrementAndGet()
+                permissionPending = false
+            }
+            return
+        }
+        if (device == null) {
+            if (transport != null) {
+                generation.incrementAndGet()
+                releaseQuietly()
+                PtpLog.add("USB-камера исчезла — ожидаю повторного появления")
+            }
+            connectionState = ConnectionState.Connecting
+            statusText = "Ожидание камеры — вернитесь к съёмке на GH5"
+            return
+        }
+        if (transport?.isSynchronized == false) {
+            recovery.blockUntilUsbChanges(device.deviceName)
+            releaseQuietly()
+            connectionState = ConnectionState.Failed(USB_REPLUG_HINT)
+            statusText = USB_REPLUG_HINT
+            PtpLog.add("Восстановление приостановлено до смены USB-устройства: незавершённая PTP-транзакция")
+            return
+        }
+        val now = SystemClock.elapsedRealtime()
+        if (!recovery.canAttempt(now)) return
+        if (camera != null && !recovery.needsRecovery(now, liveview?.isRunning == true) &&
+            device.deviceName == lastDevice?.deviceName) return
+
+        val token = generation.incrementAndGet()
+        PtpLog.add("=== автоматическое восстановление USB ===")
+        connectionState = ConnectionState.Connecting
+        statusText = "Восстановление связи — ожидание режима съёмки…"
+        releaseQuietly()
+        requestOpen(device, token)
+    }
+
+    fun onForeground() {
+        remoteControl.active=true
+        demoFeed?.active=true
+        if (!disposed) io.execute { checkConnectionHealth() }
+    }
+
+    fun onBackground(){demoFeed?.active=false;remoteControl.active=false}
 
     /** Обновляет снимок журнала диагностики для показа в интерфейсе. */
     fun refreshDiagnostics() {
@@ -264,22 +488,46 @@ class MonitorViewModel(application: Application) : AndroidViewModel(application)
         diagnostics = emptyList()
     }
 
-    private fun openCamera(device: UsbDevice) {
+    private fun openCamera(device: UsbDevice, token: Long) {
+        permissionPending = false
         try {
+            if (!isCurrent(token)) return
+            frame = null
+            latestCameraJpeg=null;heldCameraJpeg=null
+            heldFrame=null;scopes=null;cameraBattery=null;recordCommand="Статус записи GH5 не получен"
+            viewTransform=ViewTransform()
+            featureEpoch.incrementAndGet()
+            frameCount = 0
+            actualFrameSize = null
+            lastFrameSize = null
+            levelRoll = null
+            levelPitch = null
+            histogram = null
+            propDescs.clear()
+            cachedProperties.clear()
+            pendingProperties.clear()
+            performanceText = ""
+            activeLiveviewMode = null
+            liveviewModes = emptyList()
             statusText = "Открытие PTP-соединения…"
             val newTransport = connector.open(device)
             transport = newTransport
 
             val newCamera = LumixCamera(newTransport)
-            newCamera.onDevicePropChanged = { propCode ->
+            newCamera.onObjectAdded = { if(isCurrent(token))remoteControl.newObject() }
+            newCamera.onDevicePropChanged = propChanged@ { propCode ->
+                if (!isCurrent(token)) return@propChanged
                 Log.d(TAG, "камера изменила свойство 0x%08X".format(propCode))
-                scheduleSettingsRefresh()
+                scheduleSettingsRefresh(propCode)
+                if((propCode and 0xfffffff0.toInt()) in com.lumixmonitor.lumix.RemoteSetting.groups)remoteControl.requestRefresh()
             }
 
             statusText = "Открытие сессии…"
             newCamera.open()
+            if (!isCurrent(token)) throw CancellationException("подключение отменено")
             camera = newCamera
             cameraModel = newCamera.deviceInfo?.displayName
+            captureFeedback=""
 
             // Узнаём, какие режимы liveview поддерживает камера, и берём самый крупный.
             val modes = try {
@@ -296,6 +544,7 @@ class MonitorViewModel(application: Application) : AndroidViewModel(application)
             // 640x360 — младший режим по умолчанию.
             statusText = "Включение liveview…"
             newCamera.startLiveview()
+            recovery.opened(SystemClock.elapsedRealtime())
             startLiveviewLoop(newCamera)
 
             // Качество всегда на максимум: по умолчанию камера отдаёт младший режим.
@@ -309,7 +558,9 @@ class MonitorViewModel(application: Application) : AndroidViewModel(application)
                 }
             }
 
+            if (!isCurrent(token)) throw CancellationException("подключение отменено")
             connectionState = ConnectionState.Connected(device.deviceName)
+            lastError = null
             statusText = "Подключено"
             refreshSettings()
         } catch (t: Throwable) {
@@ -318,74 +569,121 @@ class MonitorViewModel(application: Application) : AndroidViewModel(application)
             // пока камера занимает единственный USB-порт телефона.
             PtpLog.add("подключение не удалось: ${t.javaClass.simpleName}: ${t.message}")
             t.stackTrace.take(8).forEach { frame -> PtpLog.add("    at $frame") }
+            if (transport?.isSynchronized == false && findCurrentDevice()?.deviceName == device.deviceName) {
+                recovery.blockUntilUsbChanges(device.deviceName)
+            }
             releaseQuietly()
-            lastError = t.message
-            connectionState = ConnectionState.Failed(t.message ?: "Неизвестная ошибка")
-            statusText = "Ошибка подключения"
+            if (!isCurrent(token)) return
+            lastError = if (recovery.requiresUsbChange) USB_REPLUG_HINT else t.message
+            connectionState = ConnectionState.Failed(lastError ?: "Неизвестная ошибка")
+            statusText = if (recovery.requiresUsbChange) USB_REPLUG_HINT else "Ожидание камеры; повторное подключение автоматически"
         }
     }
 
     fun disconnect() {
-        releaseQuietly()
+        stopDemo()
+        heldFrame=null;scopes=null;featureEpoch.incrementAndGet()
+        wantConnection = false
+        preferences.edit().putBoolean("auto_reconnect", false).apply()
+        val token = generation.incrementAndGet()
+        permissionPending = false
+        connectionState = ConnectionState.Connecting
+        statusText = "Завершение сеанса GH5 — дождитесь закрытия соединения…"
+        io.execute {
+            releaseQuietly(graceful = true)
+            mainHandler.post {
+                if (generation.get() == token && !wantConnection && !disposed) {
+                    connectionState = ConnectionState.Disconnected
+                    if (!isDemo) statusText = "Соединение закрыто"
+                }
+            }
+        }
         frame = null
+        latestCameraJpeg=null;heldCameraJpeg=null
         frameCount = 0
         levelRoll = null
         levelPitch = null
         histogram = null
         actualFrameSize = null
         lastFrameSize = null
-        connectionState = ConnectionState.Disconnected
-        statusText = "Камера не подключена"
     }
 
-    private fun releaseQuietly() {
-        try {
-            liveview?.stop()
-        } catch (t: Throwable) {
-            Log.w(TAG, "остановка потока", t)
-        }
+    private fun releaseQuietly(graceful: Boolean = false) {
+        previewDiagnosis.cancel()
+        neutralPreview=false
+        remoteControl.reset()
+        stopProxy()
+        val previousLoop = liveview
+        val previousTransport = transport
+        val previousCamera = camera
+        val endFocusAssist = cameraFocusAssist && !isDemo
+        cameraFocusAssist = false
+        focusAssistPending = false
+        selectingAssist = false
+        pendingAssistPoint = null
+        // Invalidate callbacks before unblocking old workers.
         liveview = null
-        try {
-            camera?.stopLiveview()
-            camera?.close()
-        } catch (t: Throwable) {
-            Log.w(TAG, "закрытие сессии", t)
-        }
         camera = null
+        transport = null
+        if (graceful && previousCamera != null && previousTransport?.isSynchronized == true) {
+            try {
+                val drained = previousLoop?.stopGracefully() ?: true
+                if (drained && previousTransport.isSynchronized && findCurrentDevice() != null) {
+                    if (endFocusAssist) previousCamera.setNativeFocusAssist(false)
+                    PtpLog.add("Штатное отключение: кадр завершён, останавливаю liveview и закрываю сессию")
+                    val stopped = previousCamera.stopLiveview()
+                    if (stopped && previousTransport.isSynchronized) previousCamera.close()
+                } else PtpLog.add("Штатное завершение невозможно: команда в полёте или USB недоступен")
+            } catch (t: Throwable) {
+                PtpLog.add("штатное завершение сессии: ${t.message}")
+            }
+        }
         try {
-            transport?.close()
+            // Stop accepting transactions and release the handle, without more camera commands.
+            previousTransport?.close()
         } catch (t: Throwable) {
             Log.w(TAG, "закрытие транспорта", t)
         }
-        transport = null
+        try {
+            previousLoop?.stop(join = true)
+        } catch (t: Throwable) {
+            Log.w(TAG, "остановка потока", t)
+        }
     }
 
     /** Перечитывает текущие настройки камеры. */
-    private fun refreshSettings() {
+    private fun refreshSettings(properties: Set<Int>? = null) {
         val cam = camera ?: return
+        fun read(code: Int, size: Int): PropDesc? {
+            if (properties == null || code in properties) {
+                cam.getDevicePropDesc(code, size)?.let { cachedProperties[code] = it }
+            }
+            return cachedProperties[code]
+        }
         try {
-            val modeDesc = cam.getDevicePropDesc(LumixProp.CAMERA_MODE_MODE_POS, 2)
-            val isoDesc = cam.getDevicePropDesc(LumixProp.ISO, 4)
+            val modeDesc = read(LumixProp.CAMERA_MODE_MODE_POS, 2)
+            val isoDesc = read(LumixProp.ISO, 4)
                 ?.also { propDescs[SettingKind.ISO] = it }
-            val shutterDesc = cam.getDevicePropDesc(LumixProp.SHUTTER_SPEED, 4)
+            val shutterDesc = read(LumixProp.SHUTTER_SPEED, 4)
                 ?.also { propDescs[SettingKind.SHUTTER] = it }
-            val apertureDesc = cam.getDevicePropDesc(LumixProp.APERTURE, 2)
+            val apertureDesc = read(LumixProp.APERTURE, 2)
                 ?.also { propDescs[SettingKind.APERTURE] = it }
-            val exposureDesc = cam.getDevicePropDesc(LumixProp.EXPOSURE, 2)
+            val exposureDesc = read(LumixProp.EXPOSURE, 2)
                 ?.also { propDescs[SettingKind.EXPOSURE] = it }
-            val wbDesc = cam.getDevicePropDesc(LumixProp.WHITE_BALANCE, 2)
+            val wbDesc = read(LumixProp.WHITE_BALANCE, 2)
                 ?.also { propDescs[SettingKind.WHITE_BALANCE] = it }
-            val styleDesc = cam.getDevicePropDesc(LumixProp.PHOTO_STYLE, 2)
+            val styleDesc = read(LumixProp.PHOTO_STYLE, 2)
                 ?.also { propDescs[SettingKind.PHOTO_STYLE] = it }
-            val aspectDesc = cam.getDevicePropDesc(LumixProp.IMAGE_MODE_ASPECT, 2)
+            val aspectDesc = read(LumixProp.IMAGE_MODE_ASPECT, 2)
                 ?.also { propDescs[SettingKind.ASPECT] = it }
-            val qualityDesc = cam.getDevicePropDesc(LumixProp.IMAGE_MODE_QUALITY, 2)
+            val qualityDesc = read(LumixProp.IMAGE_MODE_QUALITY, 2)
                 ?.also { propDescs[SettingKind.QUALITY] = it }
-            val afDesc = cam.getDevicePropDesc(LumixProp.AF_AREA_MODE_PARAM, 2)
+            val afDesc = read(LumixProp.AF_AREA_MODE_PARAM, 2)
             val afModeDesc = afDesc?.also { propDescs[SettingKind.AF_MODE] = it }
-            val afZoneDesc = cam.getDevicePropDesc(LumixProp.AF_AREA_AREA_PARAM, 2)
+            val afZoneDesc = read(LumixProp.AF_AREA_AREA_PARAM, 2)
                 ?.also { propDescs[SettingKind.AF_ZONE] = it }
 
+            if(camera !== cam || isDemo)return
             settings = CameraSettings(
                 mode = modeDesc?.let {
                     LumixTables.nameOf(LumixTables.exposureMode, it.current)
@@ -395,7 +693,7 @@ class MonitorViewModel(application: Application) : AndroidViewModel(application)
                     LumixCodec.decodeShutterSpeed(it.current)
                 } ?: "—",
                 aperture = apertureDesc?.let {
-                    LumixCodec.formatAperture(LumixCodec.decodeAperture(it.current))
+                    LumixCodec.apertureText(it.current)
                 } ?: "—",
                 exposureComp = exposureDesc?.let {
                     LumixCodec.decodeExposureComp(it.current)
@@ -420,7 +718,35 @@ class MonitorViewModel(application: Application) : AndroidViewModel(application)
         }
     }
 
-    fun capture() = onIo("Спуск затвора") { it.capture() }
+    /** The GH5 shutter follows the physical camera mode: still capture or start movie. */
+    fun shutter(){
+        val t=remoteControl.telemetry
+        if(t.recording==true && android.os.SystemClock.elapsedRealtime()-t.observedAtMs<4500)movie(false)
+        else capture()
+    }
+
+    fun capture() {
+        if(capturePending)return
+        if(isDemo){captureFeedback="DEMO: спуск камеры, фото/видео зависит от режима GH5";return}
+        val token=generation.get()
+        if(camera==null){captureFeedback="Подключите GH5 для спуска затвора";return}
+        capturePending=true
+        captureFeedback="Спуск затвора…"
+        io.execute {
+            try {
+                if(!isCurrent(token))return@execute
+                val cam=camera ?: return@execute
+                val accepted=cam.capture()
+                if(isCurrent(token)){
+                    captureFeedback=if(accepted)"GH5 приняла команду спуска" else "GH5 не приняла спуск: проверьте режим и карту памяти"
+                    statusText=captureFeedback
+                    PtpLog.add(captureFeedback)
+                }
+            }catch(t:Throwable){
+                if(isCurrent(token)){captureFeedback="Спуск: ${t.message}";lastError=t.message}
+            }finally{capturePending=false}
+        }
+    }
 
     fun autoFocus() = onIo("Автофокус") { it.autoFocus() }
 
@@ -468,6 +794,11 @@ class MonitorViewModel(application: Application) : AndroidViewModel(application)
                 lastFrameSize = null
 
                 activeLiveviewMode = actual ?: setting
+                if (applied) {
+                    val selected = actual ?: setting
+                    preferences.edit().putString("liveview_mode",
+                        "${selected.width},${selected.height},${selected.frameSize},${selected.fps}").apply()
+                }
                 statusText = when {
                     !applied -> "Режим ${setting.label}: камера отказала"
                     actual != null && actual.pixels != setting.pixels ->
@@ -494,6 +825,23 @@ class MonitorViewModel(application: Application) : AndroidViewModel(application)
                 LiveviewSetting(1920, 1080, fs, 30),
             )
         }
+
+    /** Bounded debug requests: only live-view size, never sensor/record settings. */
+    fun probeUsbQuality(preset: String) {
+        if (!BuildConfig.DEBUG || isDemo || camera == null) return
+        val baseline = liveviewModes.maxByOrNull { it.pixels } ?: return
+        val dimensions = when (preset) {
+            "fhd-4x3" -> 1920 to 1440
+            "qhd-4x3" -> 2560 to 1920
+            "uhd-4x3" -> 3840 to 2880
+            "uhd-16x9" -> 3840 to 2160
+            "baseline" -> baseline.width to baseline.height
+            else -> return
+        }
+        PtpLog.add("USB quality probe: $preset; only liveview transfer settings")
+        selectLiveviewMode(LiveviewSetting(dimensions.first, dimensions.second,
+            baseline.frameSize, baseline.fps))
+    }
 
     /**
      * Проверяет, какое разрешение камера отдаёт на самом деле.
@@ -615,7 +963,9 @@ class MonitorViewModel(application: Application) : AndroidViewModel(application)
      * обратно, и при неудаче попытка повторяется.
      */
     private fun applyBestLiveviewMode(cam: LumixCamera, modes: List<LiveviewSetting>) {
-        val best = modes.maxByOrNull { it.pixels } ?: return
+        val saved = preferences.getString("liveview_mode", null)
+        val best = modes.firstOrNull { "${it.width},${it.height},${it.frameSize},${it.fps}" == saved }
+            ?: modes.maxByOrNull { it.pixels } ?: return
 
         repeat(LIVEVIEW_MODE_ATTEMPTS) { attempt ->
             cam.setLiveviewSetting(best)
@@ -646,23 +996,55 @@ class MonitorViewModel(application: Application) : AndroidViewModel(application)
     }
 
     /** Создаёт и запускает цикл получения кадров. */
-    private fun startLiveviewLoop(cam: LumixCamera) {        val loop = LiveviewLoop(
+    private fun startLiveviewLoop(cam: LumixCamera) {
+        val token = generation.get()
+        lateinit var loop: LiveviewLoop
+        loop = LiveviewLoop(
             camera = cam,
             onFrame = { bitmap, liveviewFrame ->
-                frame = bitmap
-                frameCount += 1
-                levelRoll = liveviewFrame.rollDegrees
-                levelPitch = liveviewFrame.pitchDegrees
-                liveviewFrame.histogram?.let { histogram = it }
-                logFrameSize(bitmap)
+                if (isCurrent(token) && camera === cam && liveview === loop) {
+                    recovery.frameReceived(SystemClock.elapsedRealtime())
+                    latestCameraJpeg = liveviewFrame.jpeg
+                    frame = bitmap
+                    previewDiagnosis.offer(bitmap,liveviewFrame.jpeg)
+                    if(frameProbeRequested.compareAndSet(true,false)){
+                        heldFrame=bitmap;heldCameraJpeg=liveviewFrame.jpeg
+                        val jpeg=liveviewFrame.jpeg
+                        val info="${bitmap.width}x${bitmap.height}, ${bitmap.config}, ${bitmap.colorSpace}, premultiplied=${bitmap.isPremultiplied}, calibration=$displayCalibration, tools=$tools"
+                        featureIo.execute{
+                            try{
+                                val dir=getApplication<Application>().filesDir
+                                File(dir,"live-probe-source.jpg").writeBytes(jpeg)
+                                File(dir,"live-probe-decoded.png").outputStream().use{bitmap.compress(Bitmap.CompressFormat.PNG,100,it)}
+                                File(dir,"live-probe-info.txt").writeText(info)
+                                PtpLog.add("LIVE PROBE сохранён: $info")
+                            }catch(t:Throwable){PtpLog.add("LIVE PROBE: ${t.message}")}
+                        }
+                    }
+                    previewRecorder?.offer(bitmap,System.nanoTime())
+                    analyseFrame()
+                    frameCount += 1
+                    levelRoll = liveviewFrame.rollDegrees
+                    levelPitch = liveviewFrame.pitchDegrees
+                    liveviewFrame.histogram?.let { histogram = it }
+                    logFrameSize(bitmap)
+                }
             },
             onError = { t ->
-                lastError = t.message
-                statusText = "Поток прерван: ${t.message}"
+                if (isCurrent(token) && camera === cam && liveview === loop) {
+                    PtpLog.add("поток прерван: ${t.message}; проверка состояния USB")
+                    recovery.streamFailed(SystemClock.elapsedRealtime())
+                    lastError = t.message
+                    statusText = "Проверка USB после обрыва…"
+                }
+            },
+            onStats = { text ->
+                if (isCurrent(token) && camera === cam && liveview === loop) performanceText = text
             },
             onStopped = {
-                if (connectionState is ConnectionState.Connected) {
-                    statusText = "Поток остановлен"
+                if (isCurrent(token) && camera === cam && liveview === loop) {
+                    recovery.streamFailed(SystemClock.elapsedRealtime())
+                    statusText = "Проверка USB после остановки потока…"
                 }
             },
         )
@@ -686,11 +1068,25 @@ class MonitorViewModel(application: Application) : AndroidViewModel(application)
      * Камера во время liveview сыплет событиями об изменении свойств, и без
      * ограничения опрос (семь USB-команд на круг) забивал шину и мешал потоку.
      */
-    private fun scheduleSettingsRefresh() {
-        val now = System.currentTimeMillis()
-        if (now - lastSettingsRefreshMs < SETTINGS_REFRESH_MIN_INTERVAL_MS) return
-        lastSettingsRefreshMs = now
-        io.execute { refreshSettings() }
+    private fun scheduleSettingsRefresh(propCode: Int) {
+        pendingProperties.addAll(SettingsRefreshPlan.forEvent(propCode))
+        if (pendingProperties.isNotEmpty()) queueSettingsRefresh(generation.get())
+    }
+
+    private fun queueSettingsRefresh(token: Long) {
+        if (!isCurrent(token) || !settingsRefreshPending.compareAndSet(false, true)) return
+        io.schedule({
+            try {
+                if (isCurrent(token)) {
+                    val changed = pendingProperties.toSet()
+                    pendingProperties.removeAll(changed)
+                    if (changed.isNotEmpty()) refreshSettings(changed)
+                }
+            } finally {
+                settingsRefreshPending.set(false)
+                if (pendingProperties.isNotEmpty()) queueSettingsRefresh(generation.get())
+            }
+        }, 350, TimeUnit.MILLISECONDS)
     }
 
     /**
@@ -698,12 +1094,15 @@ class MonitorViewModel(application: Application) : AndroidViewModel(application)
      * Ошибка не роняет приложение, а показывается в статусе.
      */
     private fun onIo(label: String, action: (LumixCamera) -> Boolean) {
+        val token = generation.get()
         io.execute {
+            if (!isCurrent(token)) return@execute
             val cam = camera ?: return@execute
             try {
                 val ok = action(cam)
+                if (!isCurrent(token)) return@execute
                 statusText = if (ok) "$label: выполнено" else "$label: камера отказала"
-                if (ok) refreshSettings()
+                if (ok) refreshSettings(SettingsRefreshPlan.exposure)
             } catch (t: Throwable) {
                 Log.w(TAG, "$label не удалось", t)
                 lastError = t.message
@@ -716,7 +1115,293 @@ class MonitorViewModel(application: Application) : AndroidViewModel(application)
 
     fun updateTools(transform: (MonitorTools) -> MonitorTools) {
         tools = transform(tools)
+        ToolPreferences.save(preferences,tools)
+        analyseFrame(force=true)
     }
+
+    fun selectPage(page:String){
+        if(page !in listOf("frame","focus","expose") || page==selectedPage)return
+        selectedPage=page
+        preferences.edit().putString("page",page).apply()
+    }
+
+    fun updateDisplayCalibration(value:DisplayCalibration){
+        displayCalibration=value.copy(ev=value.ev.coerceIn(-3f,3f),gamma=value.gamma.coerceIn(.5f,2f),contrast=value.contrast.coerceIn(.5f,1.5f))
+        val c=displayCalibration
+        preferences.edit().putBoolean("viewCorrection",c.enabled).putFloat("viewEv",c.ev)
+            .putFloat("viewGamma",c.gamma).putFloat("viewContrast",c.contrast).apply()
+    }
+
+    fun setBrightness(value:Float){screenBrightness=if(value<0f)-1f else value.coerceIn(0.05f,1f);preferences.edit().putFloat("brightness",screenBrightness).apply()}
+
+    fun setTransform(zoom:Float,panX:Float=0f,panY:Float=0f,baseZoom:Float=1f){
+        val z=zoom.coerceIn(1f,8f);val limit=(1f-1f/(z*baseZoom.coerceAtLeast(1f)))/2f
+        viewTransform=ViewTransform(z,panX.coerceIn(-limit,limit),panY.coerceIn(-limit,limit))
+    }
+
+    fun toggleNativePixels(){nativePixels=!nativePixels;viewTransform=ViewTransform()}
+
+    fun cancelAssistSelection(){selectingAssist=false;remoteControl.pickAssistArea=null;pendingAssistPoint=null}
+    fun startFocusAssistAt(x:Int,y:Int){
+        cancelAssistSelection()
+        pendingAssistPoint=x.coerceIn(0,1000) to y.coerceIn(0,1000)
+        toggleFocusAssist()
+    }
+
+    /** Camera-side magnification; no local digital zoom is applied to live USB frames. */
+    fun toggleFocusAssist(){
+        if (focusAssistPending) return
+        if (isDemo) {
+            cameraFocusAssist = !cameraFocusAssist
+            nativePixels = false
+            setTransform(if (cameraFocusAssist) 4f else 1f)
+            captureFeedback = "DEMO: имитация лупы GH5"
+            return
+        }
+        if (camera == null) { captureFeedback = "Подключите GH5 для MF Assist"; return }
+        if(selectingAssist){cancelAssistSelection();return}
+        val token = generation.get()
+        val enabled = !cameraFocusAssist
+        val target=pendingAssistPoint ?: remoteControl.assistTarget
+        pendingAssistPoint=null
+        if(enabled && target==null){
+            selectingAssist=true
+            remoteControl.pickAssistArea={x,y->startFocusAssistAt(x,y)}
+            nativePixels=false;viewTransform=ViewTransform();heldFrame=null;heldCameraJpeg=null
+            captureFeedback="Выберите область лупы касанием кадра или схемы. Выбор запомнится на телефоне."
+            return
+        }
+        focusAssistPending = true
+        io.execute {
+            if (!isCurrent(token)) return@execute
+            try {
+                val cam=camera ?: return@execute
+                val accepted = cam.setNativeFocusAssistAt(enabled,target?.first ?: 500,target?.second ?: 500)
+                mainHandler.post {
+                    if (!isCurrent(token)) return@post
+                    if (accepted) {
+                        cameraFocusAssist = enabled
+                        if(enabled && target!=null)remoteControl.confirmAssistPosition(target)
+                        nativePixels = false
+                        viewTransform = ViewTransform()
+                        heldFrame = null
+                        heldCameraJpeg = null
+                    }
+                    captureFeedback = if (accepted) {
+                        if (enabled) "Лупа GH5: увеличение выполняет камера" else "Лупа GH5 выключена"
+                    } else "GH5 не приняла MF Assist: проверьте режим камеры"
+                    statusText = captureFeedback
+                }
+            } catch (t: Throwable) {
+                PtpLog.add("MF Assist GH5: ${t.message}")
+                mainHandler.post { if (isCurrent(token)) { captureFeedback = "MF Assist: ${t.message}"; statusText = captureFeedback } }
+            } finally {
+                mainHandler.post { if (isCurrent(token)) focusAssistPending = false }
+            }
+        }
+    }
+
+    fun rotatePreview(){
+        previewQuarterTurns=(previewQuarterTurns+1)%4
+        preferences.edit().putInt("previewRotation",previewQuarterTurns).apply()
+        nativePixels=false
+        viewTransform=ViewTransform()
+    }
+
+    fun toggleHold(){
+        if(heldFrame==null){heldFrame=frame;heldCameraJpeg=latestCameraJpeg}
+        else{heldFrame=null;heldCameraJpeg=null}
+        analyseFrame(force=true)
+    }
+
+    fun requestFrameProbe(){frameProbeRequested.set(true);PtpLog.add("LIVE PROBE: ожидаю следующий кадр камеры")}
+
+    fun startDemo(sourceImage:ByteArray?=null){
+        disconnect()
+        if(sourceImage!=null){
+            referenceRestore=tools to displayCalibration
+            tools=MonitorTools(showThirds=false,showCenterMarker=false,showLevel=false,showHistogram=false)
+            displayCalibration=DisplayCalibration()
+        }
+        demoSettingValues.clear()
+        demoSettingValues.putAll(mapOf(SettingKind.ISO to 400,SettingKind.SHUTTER to 60000,
+            SettingKind.APERTURE to 50,SettingKind.EXPOSURE to 0,SettingKind.WHITE_BALANCE to 4,
+            SettingKind.PHOTO_STYLE to 2))
+        captureFeedback=""
+        isDemo=true;cameraModel="DEMO";actualFrameSize="1280x720"
+        viewTransform=ViewTransform();nativePixels=false;cameraBattery=null
+        settings=CameraSettings(mode="M",iso="400",shutter="1/60",aperture="F5.0",exposureComp="0",whiteBalance="Дневной",photoStyle="Natural",aspect="16:9",afMode="DEMO")
+        statusText=if(sourceImage!=null)"Повтор исходного файла: без USB, LUT и коррекции" else "Демонстрация: камера не используется"
+        val epoch=featureEpoch.incrementAndGet()
+        demoFeed=DemoFeed(sourceImage) { bitmap,roll,pitch,fps ->
+            if(isDemo && epoch==featureEpoch.get() && demoMailbox.offer(DemoSample(bitmap,roll,pitch,fps,epoch)))mainHandler.post(presentDemo)
+        }
+    }
+
+    fun stopDemo(){
+        demoFeed?.close();demoFeed=null
+        referenceRestore?.let{tools=it.first;displayCalibration=it.second};referenceRestore=null
+        if(isDemo){isDemo=false;featureEpoch.incrementAndGet();frame=null;heldFrame=null;scopes=null;cameraModel=null;actualFrameSize=null;settings=CameraSettings();performanceText=""}
+        demoMailbox.clear();mainHandler.removeCallbacks(presentDemo)
+    }
+
+    private fun analyseFrame(force:Boolean=false){
+        if(!tools.showHistogram && !tools.showWaveform && !tools.showVectorscope)return
+        val bitmap=displayFrame ?: return
+        val now=SystemClock.elapsedRealtime()
+        if(!force && now-lastAnalysisMs<125)return
+        if(!analysisBusy.compareAndSet(false,true))return
+        lastAnalysisMs=now
+        val epoch=featureEpoch.get()
+        featureIo.execute {
+            try {
+                val small=Bitmap.createBitmap(160,90,Bitmap.Config.ARGB_8888)
+                Canvas(small).drawBitmap(bitmap,null,android.graphics.Rect(0,0,160,90),Paint(Paint.FILTER_BITMAP_FLAG))
+                val pixels=IntArray(160*90);small.getPixels(pixels,0,160,0,0,160,90);small.recycle()
+                val data=ScopeMath.analyse(pixels,160,90)
+                val raster=ScopeRaster.from(data)
+                mainHandler.post{if(!disposed && epoch==featureEpoch.get()){scopes=data;scopeRaster=raster}}
+            }catch(t:Throwable){PtpLog.add("Scopes: ${t.message}")}
+            finally{analysisBusy.set(false)}
+        }
+    }
+
+    fun allowedSettings(kind:SettingKind):List<Pair<Int,String>>{
+        val values=if(isDemo)when(kind){
+            SettingKind.ISO->intArrayOf(-1,100,125,160,200,250,320,400,500,640,800,1000,1250,1600,2000,2500,3200,4000,5000,6400,8000,10000,12800,16000,20000,25600)
+            SettingKind.SHUTTER->intArrayOf(8000000,4000000,2000000,1000000,500000,250000,125000,100000,80000,60000,50000,40000,30000,25000,20000,15000,10000,8000,5000,4000,2000,1000,Int.MIN_VALUE or 2000)
+            SettingKind.APERTURE->intArrayOf(28,35,40,50,56,63,71,80,90,100,110,130,140,160,180,200,220)
+            SettingKind.EXPOSURE->(-15..15).map{if(it<0)0x8000 or -it else it}.toIntArray()
+            SettingKind.WHITE_BALANCE->intArrayOf(2,4,0x8008,0x800F,6)
+            SettingKind.PHOTO_STYLE->intArrayOf(0,1,2,14,18)
+            else->intArrayOf(1,2,3)
+        }else propDescs[kind]?.allowed ?: intArrayOf()
+        return SettingScale.ordered(kind,values).map{it to describeValue(kind,it)}
+    }
+
+    fun currentSettingValue(kind:SettingKind):Int? = if(isDemo)demoSettingValues[kind] else propDescs[kind]?.current
+
+    fun currentSettingText(kind:SettingKind):String=when(kind){
+        SettingKind.ISO->settings.iso;SettingKind.SHUTTER->settings.shutter
+        SettingKind.APERTURE->settings.aperture;SettingKind.EXPOSURE->settings.exposureComp
+        SettingKind.WHITE_BALANCE->settings.whiteBalance
+        else->currentSettingValue(kind)?.let{describeValue(kind,it)} ?: "—"
+    }
+
+    fun setSettingValue(kind:SettingKind,value:Int){
+        if(isDemo){
+            if(allowedSettings(kind).none{it.first==value})return
+            demoSettingValues[kind]=value
+            val text=describeValue(kind,value)
+            settings=when(kind){SettingKind.ISO->settings.copy(iso=text);SettingKind.SHUTTER->settings.copy(shutter=text);SettingKind.APERTURE->settings.copy(aperture=text);SettingKind.EXPOSURE->settings.copy(exposureComp=text);SettingKind.WHITE_BALANCE->settings.copy(whiteBalance=text);SettingKind.PHOTO_STYLE->settings.copy(photoStyle=text);else->settings}
+            statusText="DEMO: ${kind.label} $text";return
+        }
+        val token=generation.get()
+        val sequence=settingWriteRequests.computeIfAbsent(kind){AtomicLong()}
+        val request=sequence.incrementAndGet()
+        io.execute{
+            // Scroll gestures can outpace USB: skip superseded queued writes.
+            if(!isCurrent(token) || sequence.get()!=request)return@execute
+            val cam=camera ?: return@execute
+            if(propDescs[kind]?.allowed?.contains(value)!=true)return@execute
+            try{
+                val ok=cam.setDevicePropValue(kind.paramCode,kind.valueSize,value)
+                if(isCurrent(token) && sequence.get()==request){
+                    statusText=if(ok)"${kind.label}: подтверждено камерой" else "${kind.label}: камера отказала"
+                    if(ok)refreshSettings(setOf(kind.propCode))
+                }
+            }catch(t:Throwable){if(isCurrent(token) && sequence.get()==request)statusText="${kind.label}: ${t.message}"}
+        }
+    }
+
+    fun setKelvin(kelvin:Int){
+        if(kelvin !in 2500..10000)return
+        if(isDemo){settings=settings.copy(whiteBalance="${kelvin}K");return}
+        onIo("ББ ${kelvin}K"){it.setColorTemperature(kelvin)}
+    }
+
+    fun movie(start:Boolean){
+        if(isDemo){statusText="DEMO: запись на камере не запускается";return}
+        val token=generation.get()
+        io.execute{
+            if(!isCurrent(token))return@execute
+            val cam=camera ?: return@execute
+            try{
+                val accepted=cam.movie(start)
+                if(isCurrent(token)){
+                    recordCommand=if(accepted)"${if(start)"REC" else "STOP"}: команда принята; фактический статус не получен" else "Камера отказала"
+                    statusText=recordCommand
+                }
+            }catch(t:Throwable){if(isCurrent(token)){recordCommand="REC/STOP: ${t.message}";statusText=recordCommand}}
+        }
+    }
+
+    fun probeBattery(){
+        if(isDemo){statusText="DEMO: батарея камеры недоступна";return}
+        val token=generation.get()
+        io.execute{
+            val cam=camera ?: return@execute
+            if(!isCurrent(token))return@execute
+            try{val value=cam.batteryLevel();if(isCurrent(token)){cameraBattery=value;statusText=value?.let{"Батарея GH5: $it%"} ?: "GH5 не вернула заряд батареи"}}
+            catch(t:Throwable){if(isCurrent(token))statusText="Батарея: ${t.message}"}
+        }
+    }
+
+    fun loadLut(uri:Uri){
+        val token=lutEpoch.incrementAndGet()
+        featureIo.execute {
+            try {
+                val app=getApplication<Application>()
+                val text=app.contentResolver.openInputStream(uri)?.bufferedReader()?.use{reader->
+                    val out=StringBuilder();val buffer=CharArray(8192);var n=reader.read(buffer)
+                    while(n>=0){require(out.length+n<=16_000_000){"Слишком большой LUT"};out.append(buffer,0,n);n=reader.read(buffer)};out.toString()
+                } ?: error("Файл не открыт")
+                val lut=CubeLut.parse(text.reader(),uri.lastPathSegment?.substringAfterLast('/') ?: "LUT")
+                if(token!=lutEpoch.get())return@execute
+                File(app.filesDir,"viewing.cube").writeText(text)
+                mainHandler.post{if(!disposed && token==lutEpoch.get()){viewingLut=lut;updateTools{it.copy(lutEnabled=true)};statusText="LUT: ${lut.title}"}}
+            }catch(t:Throwable){mainHandler.post{if(!disposed && token==lutEpoch.get())statusText="LUT: ${t.message}"}}
+        }
+    }
+
+    fun clearLut(){
+        lutEpoch.incrementAndGet()
+        viewingLut=null;updateTools{it.copy(lutEnabled=false)}
+        for(page in listOf("frame","focus","expose"))getApplication<Application>().getSharedPreferences("tools_$page",0).edit().putBoolean("lutEnabled",false).apply()
+        featureIo.execute{File(getApplication<Application>().filesDir,"viewing.cube").delete()}
+        statusText="Просмотр без LUT"
+    }
+
+    fun savePreview(){
+        val bitmap=displayFrame ?: return
+        val demo=isDemo
+        val jpeg=if(demo)null else if(heldFrame!=null)heldCameraJpeg else latestCameraJpeg
+        featureIo.execute{
+            var pending:Uri?=null
+            try{
+                val app=getApplication<Application>();val name="GH5_${if(demo)"DEMO_" else ""}${System.currentTimeMillis()}.jpg"
+                if(Build.VERSION.SDK_INT>=29){
+                    val values=ContentValues().apply{put(MediaStore.Images.Media.DISPLAY_NAME,name);put(MediaStore.Images.Media.MIME_TYPE,"image/jpeg");put(MediaStore.Images.Media.RELATIVE_PATH,"Pictures/GH5 Monitor");put(MediaStore.Images.Media.IS_PENDING,1)}
+                    pending=app.contentResolver.insert(MediaStore.Images.Media.EXTERNAL_CONTENT_URI,values) ?: error("Не удалось создать JPEG")
+                    app.contentResolver.openOutputStream(pending!!)?.use{if(jpeg!=null)it.write(jpeg) else check(bitmap.compress(Bitmap.CompressFormat.JPEG,95,it))} ?: error("JPEG не открыт")
+                    app.contentResolver.update(pending!!,ContentValues().apply{put(MediaStore.Images.Media.IS_PENDING,0)},null,null)
+                }else File(app.getExternalFilesDir("Pictures"),name).outputStream().use{if(jpeg!=null)it.write(jpeg) else check(bitmap.compress(Bitmap.CompressFormat.JPEG,95,it))}
+                mainHandler.post{statusText="JPEG исходного превью сохранён: $name"}
+            }catch(t:Throwable){pending?.let{getApplication<Application>().contentResolver.delete(it,null,null)};mainHandler.post{statusText="Сохранение: ${t.message}"}}
+        }
+    }
+
+    fun startProxy(){
+        val bitmap=frame ?: return
+        if(previewRecorder!=null)return
+        val width=bitmap.width-(bitmap.width%2);val height=bitmap.height-(bitmap.height%2)
+        proxyRecording=true;proxyStatus="Подготовка MP4 без звука…"
+        previewRecorder=PreviewRecorder(getApplication(),width,height,isDemo,
+            onProgress={text->mainHandler.post{proxyStatus=text}},
+            onFinished={text->mainHandler.post{previewRecorder=null;proxyRecording=false;proxyStatus=text;statusText=text}})
+    }
+
+    fun stopProxy(){previewRecorder?.stop()}
 
     // -------------------------------------------------------- список устройств
 
@@ -734,7 +1419,9 @@ class MonitorViewModel(application: Application) : AndroidViewModel(application)
      * означает «больше света»: одинаково для ISO, выдержки, диафрагмы и EV.
      */
     fun cycleSetting(kind: SettingKind, forward: Boolean = true) {
+        val token = generation.get()
         io.execute {
+            if (!isCurrent(token)) return@execute
             val cam = camera ?: return@execute
             try {
                 val desc = propDescs[kind]
@@ -766,7 +1453,7 @@ class MonitorViewModel(application: Application) : AndroidViewModel(application)
                     // Обновляем кэш сразу: иначе следующий тап считается от старого
                     // значения, и настройка прыгает не туда.
                     propDescs[kind] = desc.copy(current = target)
-                    refreshSettings()
+                    refreshSettings(setOf(kind.propCode))
                 }
             } catch (t: Throwable) {
                 Log.w(TAG, "переключение ${kind.label} не удалось", t)
@@ -816,7 +1503,7 @@ class MonitorViewModel(application: Application) : AndroidViewModel(application)
     fun describeValue(kind: SettingKind, value: Int): String = when (kind) {
         SettingKind.ISO -> LumixCodec.decodeIso(value)
         SettingKind.SHUTTER -> LumixCodec.decodeShutterSpeed(value) ?: "—"
-        SettingKind.APERTURE -> LumixCodec.formatAperture(LumixCodec.decodeAperture(value))
+        SettingKind.APERTURE -> LumixCodec.apertureText(value)
         SettingKind.EXPOSURE -> LumixCodec.decodeExposureComp(value)
         SettingKind.WHITE_BALANCE ->
             LumixTables.nameOf(LumixTables.whiteBalance, value) ?: "0x%04X".format(value)
@@ -841,7 +1528,9 @@ class MonitorViewModel(application: Application) : AndroidViewModel(application)
     }
 
     /** Кэш описаний свойств: текущее значение и список допустимых. */
-    private val propDescs = mutableMapOf<SettingKind, PropDesc>()
+    private val propDescs = ConcurrentHashMap<SettingKind, PropDesc>()
+    private val demoSettingValues=mutableMapOf<SettingKind,Int>()
+    private val settingWriteRequests=ConcurrentHashMap<SettingKind,AtomicLong>()
 
     fun clearError() {
         lastError = null
@@ -849,16 +1538,33 @@ class MonitorViewModel(application: Application) : AndroidViewModel(application)
 
     override fun onCleared() {
         super.onCleared()
-        releaseQuietly()
+        remoteControl.close()
+        stopDemo()
+        featureEpoch.incrementAndGet()
+        lutEpoch.incrementAndGet()
+        featureIo.shutdownNow()
+        stopProxy()
+        disposed = true
+        wantConnection = false
+        generation.incrementAndGet()
+        healthCheck.cancel(false)
         connector.release()
-        io.shutdownNow()
+        io.execute { releaseQuietly(graceful = true) }
+        io.shutdown()
     }
+
+    private val healthCheck = io.scheduleWithFixedDelay({
+        try {
+            checkConnectionHealth()
+        } catch (t: Throwable) {
+            PtpLog.add("проверка соединения: ${t.message}")
+        }
+    }, 1, 1, TimeUnit.SECONDS)
 
     companion object {
         private const val TAG = "MonitorViewModel"
+        private const val USB_REPLUG_HINT = "USB-передача прервана. Отсоедините кабель GH5 и подключите снова в PC(Tether)."
 
-        /** Не чаще раза в секунду: иначе опрос настроек забивает USB и душит liveview. */
-        private const val SETTINGS_REFRESH_MIN_INTERVAL_MS = 1_000L
 
         /** Сколько раз пробовать поставить максимальный режим живью. */
         private const val LIVEVIEW_MODE_ATTEMPTS = 3

@@ -1,6 +1,7 @@
 MIT License
 
 Copyright (c) 2026 Lumix Monitor contributors
+Copyright (c) 2026 s1lax (GH5 adaptation and additions)
 
 Permission is hereby granted, free of charge, to any person obtaining a copy
 of this software and associated documentation files (the "Software"), to deal
@@ -22,8 +23,8 @@ SOFTWARE.
 
 --------------------------------------------------------------------------
 
-Работа по протоколу Panasonic PTP основана на проекте Tethr
-(https://github.com/baku89/tethr), распространяемом по лицензии MIT:
+The Panasonic PTP protocol work is based on Tethr
+(https://github.com/baku89/tethr), distributed under the MIT License:
 
     MIT License
 

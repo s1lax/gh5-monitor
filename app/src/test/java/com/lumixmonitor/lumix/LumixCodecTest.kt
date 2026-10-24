@@ -103,6 +103,12 @@ class LumixCodecTest {
         assertEquals("auto (i-ISO)", LumixCodec.decodeIso(0xFFFFFFFE.toInt()))
         assertEquals("800", LumixCodec.decodeIso(800))
     }
+    @Test fun `расширенное ISO и неизвестная диафрагма не показываются как огромные числа или f0`() {
+        assertEquals("L100",LumixCodec.decodeIso(0x10000064))
+        assertEquals("—",LumixCodec.apertureText(0))
+        assertEquals("—",LumixCodec.apertureText(0xfffe))
+        assertEquals("Auto",LumixCodec.apertureText(0xffff))
+    }
 
     // ------------------------------------------------------------------ таблицы
 

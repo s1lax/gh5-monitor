@@ -4,6 +4,8 @@ import java.io.File
 import java.text.SimpleDateFormat
 import java.util.Date
 import java.util.Locale
+import java.util.concurrent.Executors
+import java.util.concurrent.TimeUnit
 
 /**
  * Журнал диагностики: в памяти и в файле.
@@ -19,7 +21,14 @@ object PtpLog {
     private const val MAX_FILE_BYTES = 512 * 1024L
 
     private val entries = ArrayDeque<String>()
+    private val pending = ArrayDeque<String>()
+    private val fileLock = Any()
     private val timeFormat = SimpleDateFormat("HH:mm:ss.SSS", Locale.US)
+    private val writer = Executors.newSingleThreadScheduledExecutor { task ->
+        Thread(task, "lumix-log-writer").apply { isDaemon = true }
+    }.apply {
+        scheduleWithFixedDelay({ flush() }, 250, 250, TimeUnit.MILLISECONDS)
+    }
 
     @Volatile
     private var file: File? = null
@@ -45,7 +54,18 @@ object PtpLog {
         while (entries.size > MAX_ENTRIES) {
             entries.removeFirst()
         }
-        writeToFile(line)
+        pending.addLast(line)
+        while (pending.size > MAX_ENTRIES) pending.removeFirst()
+    }
+
+    fun flush() {
+        synchronized(fileLock) {
+            val batch = synchronized(this) {
+                if (pending.isEmpty()) return
+                pending.joinToString("\n").also { pending.clear() }
+            }
+            writeToFile(batch)
+        }
     }
 
     private fun writeToFile(line: String) {

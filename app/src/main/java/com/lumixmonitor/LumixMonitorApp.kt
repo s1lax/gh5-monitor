@@ -29,6 +29,7 @@ class LumixMonitorApp : Application() {
         Thread.setDefaultUncaughtExceptionHandler { thread, throwable ->
             PtpLog.add("НЕОБРАБОТАННОЕ ИСКЛЮЧЕНИЕ в потоке ${thread.name}: $throwable")
             throwable.stackTrace.take(12).forEach { frame -> PtpLog.add("    at $frame") }
+            PtpLog.flush()
 
             if (thread === Looper.getMainLooper().thread) {
                 systemHandler?.uncaughtException(thread, throwable)

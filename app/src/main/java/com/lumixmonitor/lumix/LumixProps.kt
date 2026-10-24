@@ -202,6 +202,7 @@ object LumixCodec {
 
     /** Декодирует f-число. */
     fun decodeAperture(value: Int): Double = value / 10.0
+    fun apertureText(value:Int):String = when(value){0,0xfffe->"—";0xffff->"Auto";else->formatAperture(decodeAperture(value))}
 
     /** Форматирует диафрагму для интерфейса: 2.8 -> "f/2.8". */
     fun formatAperture(fNumber: Double): String {
@@ -222,7 +223,8 @@ object LumixCodec {
     fun decodeIso(value: Int): String = when (value) {
         ISO_AUTO -> "auto"
         ISO_AUTO_I -> "auto (i-ISO)"
-        else -> value.toString()
+        -3 -> "—"
+        else -> if(value and 0x10000000 != 0 && value>0)"L${value and 0x0fffffff}" else value.toString()
     }
 
     /** Кодирует ISO из строки. */
@@ -262,10 +264,11 @@ object LumixTables {
         0x0007 to "flash",
         0x8008 to "cloud",
         0x800F to "shade",
-        0x8010 to "manual 1",
-        0x8011 to "manual 2",
-        0x8012 to "manual 3",
-        0x8013 to "manual 4",
+        0x800B to "WB 1",0x800C to "WB 2",0x800D to "WB 3",0x800E to "WB 4",
+        0x8010 to "K1",
+        0x8011 to "K2",
+        0x8012 to "K3",
+        0x8013 to "K4",
         0x8014 to "auto cool",
         0x8015 to "auto warm",
     )
@@ -277,8 +280,11 @@ object LumixTables {
         3 to "Monochrome",
         4 to "Landscape",
         5 to "Portrait",
+        6 to "Custom 1",7 to "Cinelike D",8 to "Cinelike V",9 to "V-Log L",
+        10 to "Linear Gamma",11 to "Custom 2",12 to "Custom 3",13 to "Custom 4",
         14 to "Like709",
         15 to "L.Monochrome",
+        16 to "HLG",
         17 to "L.Monochrome D",
         18 to "Flat",
         19 to "MY PHOTOSTYLE 1",
@@ -306,8 +312,8 @@ object LumixTables {
      * Названия режимов и зон автофокуса: камера их не сообщает, поэтому
      * пока показываем номер варианта. Таблицы заполним по её кодам из журнала.
      */
-    val afMode: List<Pair<Int, String>> = emptyList()
-    val afZone: List<Pair<Int, String>> = emptyList()
+    val afMode: List<Pair<Int, String>> = listOf(0 to "AF",1 to "AF Macro",2 to "AF Macro D",3 to "MF",4 to "AF-S",5 to "AF-C",6 to "AF-F")
+    val afZone: List<Pair<Int, String>> = listOf(0 to "1 точка",1 to "Лицо / глаза",2 to "Слежение",3 to "Pinpoint",4 to "49 точек",5 to "Пользоват. зона",6 to "225 точек")
 
     fun nameOf(table: List<Pair<Int, String>>, code: Int): String? =
         table.firstOrNull { it.first == code }?.second

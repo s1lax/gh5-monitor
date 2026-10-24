@@ -111,4 +111,35 @@ class LiveviewFrameParserTest {
     fun `слишком короткий буфер не разбирается`() {
         assertNull(LiveviewFrameParser.parse(ByteArray(2)))
     }
+
+    @Test
+    fun `максимальная длина блока не переполняет смещение`() {
+        val data = ByteArray(200)
+        ByteBuffer.wrap(data).order(ByteOrder.LITTLE_ENDIAN)
+            .putInt(levelGaugeBlockId).putInt(Int.MAX_VALUE)
+        assertNull(LiveviewFrameParser.parse(data))
+    }
+
+    @Test
+    fun `переполненная длина гистограммы пропускается но JPEG сохраняется`() {
+        val data = ByteArray(200)
+        val bb = ByteBuffer.wrap(data).order(ByteOrder.LITTLE_ENDIAN)
+        bb.putInt(histogramBlockId).putInt(16).putInt(0)
+            .putInt(1).putInt(Int.MAX_VALUE).putInt(1)
+        data[180] = 0xFF.toByte()
+        data[181] = 0xD8.toByte()
+        val frame = LiveviewFrameParser.parse(data)
+        assertNotNull(frame)
+        assertNull(frame!!.histogram)
+        assertEquals(20, frame.jpeg.size)
+    }
+
+    @Test
+    fun `смещение JPEG на последний байт не читает за концом буфера`() {
+        val data = ByteArray(200)
+        ByteBuffer.wrap(data).order(ByteOrder.LITTLE_ENDIAN)
+            .putInt(jpegOffsetBlockId).putInt(8).putInt(0).putInt(199)
+        data[199] = 0xFF.toByte()
+        assertNull(LiveviewFrameParser.parse(data))
+    }
 }

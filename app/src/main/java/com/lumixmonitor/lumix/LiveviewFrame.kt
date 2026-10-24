@@ -71,7 +71,9 @@ object LiveviewFrameParser {
             val dataSize = readU32(data, offset + 4)
 
             // Защита от мусора: длина не может быть отрицательной или выходить за буфер.
-            if (dataSize < 0 || offset + 8 + dataSize > data.size) break
+            // Compare remaining bytes before adding an untrusted 32-bit length:
+            // offset + 8 + dataSize can overflow into a negative array index.
+            if (dataSize < 0 || dataSize > data.size - offset - 8) break
 
             val valueAt = offset + 12
 
@@ -83,9 +85,8 @@ object LiveviewFrameParser {
                     if (valueAt + 12 <= data.size) {
                         val samples = readU32(data, valueAt + 4)
                         val start = valueAt + 12
-                        val end = start + samples
-                        if (samples > 0 && end <= data.size) {
-                            histogram = data.copyOfRange(start, end)
+                        if (samples > 0 && samples <= data.size - start) {
+                            histogram = data.copyOfRange(start, start + samples)
                         }
                     }
                 }
@@ -119,7 +120,7 @@ object LiveviewFrameParser {
      * чтобы не отдать на декодирование мусор.
      */
     private fun extractJpeg(data: ByteArray, offset: Int): ByteArray? {
-        if (offset <= 0 || offset >= data.size) return null
+        if (offset <= 0 || offset >= data.size - 1) return null
 
         if (data[offset] == JPEG_SOI_0 && data[offset + 1] == JPEG_SOI_1) {
             return data.copyOfRange(offset, data.size)
