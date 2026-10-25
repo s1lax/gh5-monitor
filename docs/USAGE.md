@@ -2,6 +2,8 @@
 
 This guide describes 0.5.3-gh5. Documentation is English; current app labels are Russian, shown below where useful.
 
+For experimental Wi-Fi support on the 0.6.0 branch, see [Wi-Fi setup and controls](WIFI.md). USB instructions below continue to apply.
+
 ## Connect
 
 Use a data-capable USB cable and a USB Host / OTG-capable phone. Enable OTG if your phone requires it. Connect the camera, choose **PC(Tether)**, accept Android's USB permission prompt and open GH5 Monitor. **Подключить** means Connect.

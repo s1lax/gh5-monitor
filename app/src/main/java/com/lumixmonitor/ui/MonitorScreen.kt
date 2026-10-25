@@ -82,6 +82,7 @@ fun MonitorScreen(viewModel: MonitorViewModel) {
 @Composable
 private fun ConnectScreen(viewModel: MonitorViewModel) {
     var devices by remember { mutableStateOf(viewModel.findDevices()) }
+    var wifiTab by remember { mutableStateOf(viewModel.lastConnectionWifi || viewModel.isWifi) }
     var showDiagnostics by remember { mutableStateOf(false) }
 
     // Список устройств обновляем, пока не подключились.
@@ -97,7 +98,8 @@ private fun ConnectScreen(viewModel: MonitorViewModel) {
     Column(
         modifier = Modifier
             .fillMaxSize()
-            .padding(24.dp),
+            .padding(24.dp)
+            .verticalScroll(rememberScrollState()),
         verticalArrangement = Arrangement.Center,
     ) {
         Text(
@@ -106,6 +108,11 @@ private fun ConnectScreen(viewModel: MonitorViewModel) {
             fontWeight = FontWeight.SemiBold,
         )
         Spacer(Modifier.height(8.dp))
+        Row(horizontalArrangement=Arrangement.spacedBy(12.dp)){
+            TextButton(onClick={wifiTab=false;viewModel.showConnectionSetup(false)}){Text(if(!wifiTab)"● USB" else "USB")}
+            TextButton(onClick={wifiTab=true;viewModel.showConnectionSetup(true)}){Text(if(wifiTab)"● Wi-Fi" else "Wi-Fi")}
+        }
+        if(wifiTab){WifiConnectPanel(viewModel)}else{
         Text(
             text = "Подключите камеру кабелем USB и включите на ней режим PC(Tether).",
             style = MaterialTheme.typography.bodyMedium,
@@ -174,10 +181,11 @@ private fun ConnectScreen(viewModel: MonitorViewModel) {
             }
         }
 
+        }
         Spacer(Modifier.height(28.dp))
         OutlinedButton(onClick = { viewModel.startDemo() }) { Text("Демо без камеры") }
         Row(horizontalArrangement = Arrangement.spacedBy(12.dp)) {
-            OutlinedButton(onClick = { viewModel.reconnect() }) {
+            OutlinedButton(onClick = { if(wifiTab)viewModel.connectWifi(viewModel.wifi.address) else viewModel.reconnect() }) {
                 Text("Переподключиться")
             }
             if (state is ConnectionState.Connecting) {

@@ -16,6 +16,7 @@ Use `./gradlew.bat` in PowerShell. The debug APK is under `app/build/outputs/apk
 | --- | --- |
 | `ptp/` | PTP containers, bounded bulk reads and serialized USB transactions |
 | `usb/` | Android USB discovery and permission handling |
+| `wifi/` | Local camera address validation, HTTP control, advertised option catalog, SSDP discovery and capacity-one UDP/JPEG preview |
 | `lumix/LumixCamera.kt`, `LumixRemote.kt` | Camera operations and extended property groups |
 | `lumix/LiveviewFrame.kt`, `LiveviewLoop.kt`, `LatestPresentation.kt` | Frame parsing, acquisition, decoding and latest-frame presentation |
 | `RemoteCameraController.kt` | Extended settings, telemetry, camera files, MF / AF control |
@@ -25,6 +26,8 @@ Use `./gradlew.bat` in PowerShell. The debug APK is under `app/build/outputs/apk
 | `PreviewDiagnosisController.kt` | Read-only camera-state capture, original JPEG / PNG / JSON and ZIP export |
 
 Tests include parser fixtures and numerical helpers under `app/src/test`. Fixtures are bounded property/status replies, not image frames or complete device-information dumps.
+
+The Wi-Fi controller uses a separate serialized executor for HTTP control and heartbeat. UDP reception, decoding and presentation are independent with capacity-one hand-offs. `WifiSettingsCatalog` assigns opaque UI IDs to advertised HTTP tokens; it never reuses USB property encodings. Camera sockets bind to Android's Wi-Fi `Network` without changing the process default route. Initial access/stream setup is bounded; recovery respects playback and avoids repeatedly forcing a camera mode change. See [the Wi-Fi guide](WIFI.md) for unsupported operations and the difference between local app frame age and end-to-end latency.
 
 ## Protocol and transport
 

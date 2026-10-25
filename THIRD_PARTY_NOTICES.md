@@ -25,3 +25,5 @@ The separately downloaded LUMIX Remote Control Library and its original document
 ## Other protocol research references
 
 The upstream project also referenced [libgphoto2](https://github.com/gphoto/libgphoto2), [pylumix](https://github.com/abichinger/pylumix) and [LumixController](https://github.com/davidkim9/LumixController). These references do not mean their code is bundled or linked into this application.
+
+The independently implemented Kotlin Wi-Fi transport was informed by [pylumix](https://github.com/abichinger/pylumix) (MIT), [Lumix Remote](https://github.com/sapoepsilon/lumix-remote) (MIT), and the [libgphoto2 Lumix driver](https://github.com/gphoto/libgphoto2/blob/master/camlibs/lumix/lumix.c). These projects document camera HTTP command names, setting encodings and UDP preview framing. Their Python/C sources, example images and camera fixtures are not bundled, and no GPL driver code is linked or copied. Lumix Remote's S5 validation is not a GH5 compatibility claim.

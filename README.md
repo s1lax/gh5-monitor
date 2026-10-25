@@ -1,6 +1,6 @@
 # GH5 Monitor
 
-**An Android USB field monitor and remote control for the Panasonic Lumix GH5.**
+**An Android field monitor and remote control for the Panasonic Lumix GH5, with USB and experimental Wi-Fi connections.**
 
 [![Android 8+](https://img.shields.io/badge/Android-8.0%2B-3DDC84)](#compatibility)
 [![License: MIT](https://img.shields.io/badge/License-MIT-blue.svg)](LICENSE)
@@ -14,11 +14,14 @@ Created and tested by **[s1lax](https://github.com/s1lax)**, developed with **GP
 
 > **Experimental, first public preview: 0.5.3-gh5.** The app has been tested with one GH5 and one phone, not a broad compatibility matrix. The current in-app labels are Russian; this repository's documentation is in English. Contributions for English UI localization are welcome.
 
+The `feature/wifi-monitor` branch adds **0.6.0-gh5** Wi-Fi support using local camera HTTP commands and UDP JPEG preview. The published 0.5.3 release remains USB-only. Wi-Fi hardware validation is in progress; see the [Wi-Fi guide](docs/WIFI.md) for setup, scope and latency limits.
+
 ## What it can do
 
 | Area | Features |
 | --- | --- |
 | USB live view | Camera-advertised quality selection, JPEG preview, recovery after temporary interruptions, performance diagnostics |
+| Wi-Fi preview (0.6.0 branch) | Direct camera hotspot or a shared LAN, local-IP entry / SSDP discovery, newest-frame UDP decoding, basic remote controls and camera-advertised setting choices |
 | Field monitor UI | Portrait and landscape layouts, large centered shutter control, clean view, independent tools that can be enabled together |
 | Focus | **Camera-native MF Assist**, remembered phone-selected area, navigator, hold-to-repeat movement and ±1× magnification; separate 1:1 display inspection and app focus peaking |
 | Exposure tools | Zebra, false color, histogram / RGB histogram, waveform and vectorscope, calculated from the USB preview |
@@ -41,7 +44,7 @@ Feature availability depends on camera state, lens, firmware and the values repo
 
 The published APK is an **experimental debug-signed build**, the same tested 0.5.3 build used during development. Its SHA-256 is in the release's `SHA256SUMS.txt`. Independently built APKs normally use a different debug key and may not install over it. No private signing key is included in this repository.
 
-The debug build contains optional phone-camera diagnostic helpers and declares Android's CAMERA permission. They are not required for GH5 USB monitoring. The main manifest does not request Internet permission; the app has no built-in cloud upload or analytics. See [privacy and diagnostics](docs/PRIVACY.md).
+The debug build contains optional phone-camera diagnostic helpers and declares Android's CAMERA permission. They are not required for GH5 monitoring. Version 0.6.0 adds network permissions for local Wi-Fi camera communication; the app has no built-in cloud upload or analytics. See [privacy and diagnostics](docs/PRIVACY.md).
 
 ## Compatibility
 
@@ -80,10 +83,13 @@ The project builds from the published source and normal Gradle dependencies. **N
 ```mermaid
 flowchart LR
     GH5[GH5 in PC Tether mode] -->|USB PTP / JPEG| USB[Serialized USB transport]
+    WLAN[GH5 Remote Shooting and View] -->|UDP JPEG| WiFi[Wi-Fi newest-frame receiver]
     USB --> Decode[JPEG parsing and latest-frame decoding]
+    WiFi --> Decode
     Decode --> GL[OpenGL preview and monitor tools]
     Decode --> Save[Original preview / diagnostics / proxy]
     UI[Compose controls] -->|Camera commands| USB
+    UI -->|Local HTTP commands| WLAN
 ```
 
 The code keeps camera transactions serialized and limits pending frame work to avoid a growing preview queue. Camera-native MF Assist is different from digitally enlarging an already received 720p image. See the [developer notes](docs/DEVELOPMENT.md) and [protocol reference](docs/lumix-protocol-reference.md).

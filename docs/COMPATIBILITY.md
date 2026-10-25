@@ -12,6 +12,10 @@
 
 The app requires Android 8.0+ and USB Host support. Original-file saving and diagnostic ZIP export require Android 10+. The original upstream project targeted the S5; its results are not evidence that this fork has been tested on that camera. GH5 II, GH5S, other phones and other firmware versions need their own results.
 
+## Experimental Wi-Fi branch
+
+Version 0.6.0 adds a local HTTP / UDP transport for Remote Shooting & View, independent of USB PTP. The build and 106 JVM tests pass, and the APK is installed on the development phone. Direct GH5 connection delivered VGA 640×360 and QVGA 320×184 at approximately 30 fps in steady periods. ISO write/readback and restoration, REC / STOP and four orientations were checked. Motion-associated receive stalls and recovery are still under investigation; shared-router operation, other hardware and every exposed setting remain unverified. These checks do not inherit USB's hardware results. See [Wi-Fi setup and limitations](WIFI.md).
+
 ## Validation levels
 
 - **Hardware checked:** USB live view / recovery in tested interruptions; independent app overlays; native MF Assist area and ±1× controls; ISO / WB examples; selected video quality changes; REC / STOP; one original JPEG transfer; both screen orientations; diagnostic video capture / ZIP export.

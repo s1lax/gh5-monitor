@@ -110,9 +110,9 @@ private fun FieldMonitorBody(vm:MonitorViewModel){
         }
     }
     val assistLabel=if(vm.focusAssistPending)"…" else if(vm.selectingAssist)"◎" else "MF"
-    val t=vm.remoteControl.telemetry
+    val t=vm.cameraTelemetry
     val actualRec=t.recording==true && android.os.SystemClock.elapsedRealtime()-t.observedAtMs<4500
-    val connectionLabel=if(actualRec)"● REC" else if(vm.proxyRecording)"● MP4" else if(vm.isDemo)"DEMO" else "USB"
+    val connectionLabel=if(actualRec)"● REC" else if(vm.proxyRecording)"● MP4" else if(vm.isDemo)"DEMO" else if(vm.isWifi)"Wi-Fi" else "USB"
     val fps=Regex("([0-9.]+) FPS").find(vm.performanceText)?.groupValues?.get(1)?.let{"$it fps"} ?: "—"
     val cameraStatus=((t.battery ?: vm.cameraBattery)?.let{"GH5 $it%"} ?: "GH5 —")+if(vm.neutralPreview)" · USB без LUT" else if(vm.displayCalibration.isAdjusted)" · V" else ""
     var captureNotice by remember{mutableStateOf(false)}
@@ -144,7 +144,7 @@ private fun FieldMonitorBody(vm:MonitorViewModel){
                     Setting(SettingKind.EXPOSURE,"EV",vm.settings.exposureComp,true,controlsWidth/5)
                 }
                 Row(Modifier.fillMaxWidth().height(88.dp).padding(horizontal=12.dp),verticalAlignment=Alignment.CenterVertically){
-                    Box(Modifier.weight(1f),contentAlignment=Alignment.Center){Rail("Лупа GH5",assistLabel,vm.cameraFocusAssist,horizontal=true,cellWidth=88.dp,enabled=!vm.focusAssistPending){vm.toggleFocusAssist()}}
+                    Box(Modifier.weight(1f),contentAlignment=Alignment.Center){Rail("Лупа GH5",assistLabel,vm.cameraFocusAssist,horizontal=true,cellWidth=88.dp,enabled=!vm.focusAssistPending && !vm.isWifi){vm.toggleFocusAssist()}}
                     ShutterButton(vm,Modifier.width(88.dp))
                     Box(Modifier.weight(1f),contentAlignment=Alignment.Center){Rail("Фокус","AF",horizontal=true,cellWidth=88.dp){vm.autoFocus()}}
                 }
@@ -175,7 +175,7 @@ private fun FieldMonitorBody(vm:MonitorViewModel){
                     Column(Modifier.weight(1f).fillMaxWidth(),verticalArrangement=Arrangement.SpaceEvenly){
                         Setting(SettingKind.WHITE_BALANCE,"ББ",compactWb(vm.settings.whiteBalance),height=cellHeight)
                         Setting(SettingKind.EXPOSURE,"EV",vm.settings.exposureComp,height=cellHeight)
-                        Rail("Лупа GH5",assistLabel,vm.cameraFocusAssist,enabled=!vm.focusAssistPending,cellHeight=cellHeight){vm.toggleFocusAssist()}
+                        Rail("Лупа GH5",assistLabel,vm.cameraFocusAssist,enabled=!vm.focusAssistPending && !vm.isWifi,cellHeight=cellHeight){vm.toggleFocusAssist()}
                     }
                 }
             }
@@ -219,9 +219,9 @@ private fun FieldMonitorBody(vm:MonitorViewModel){
                         Toggle("Пикинг",tools.focusPeaking){vm.updateTools{it.copy(focusPeaking=!it.focusPeaking)}}
                         ToolSlider("Порог границ",tools.peakingThreshold,String.format("%.2f",tools.peakingThreshold),.02f.. .3f){v->vm.updateTools{it.copy(peakingThreshold=v)}}
                         Action(if(vm.nativePixels)"Пиксели 1:1 ✓" else "Пиксели 1:1"){vm.toggleNativePixels()}
-                        Toggle("AF касанием кадра",vm.remoteControl.touchAf){vm.remoteControl.toggleTouchAf()}
+                        if(!vm.isWifi)Toggle("AF касанием кадра",vm.remoteControl.touchAf){vm.remoteControl.toggleTouchAf()}
                         Action("Автофокус GH5"){vm.autoFocus()}
-                        Action("Лупа GH5 / выбрать область"){menu=null;vm.toggleFocusAssist()}
+                        if(!vm.isWifi)Action("Лупа GH5 / выбрать область"){menu=null;vm.toggleFocusAssist()}
                         Action("Полное управление фокусом GH5"){menu="camera"}
                         Text("Шаги MF, режим и зона AF, блокировка AF/AE — в разделе «Камера → Фокус». Масштаб ±1× доступен на навигаторе, когда включена лупа.",color=Quiet,fontSize=12.sp)
                         }
@@ -240,10 +240,10 @@ private fun FieldMonitorBody(vm:MonitorViewModel){
                         Action("Сбросить увеличение"){if(vm.nativePixels)vm.toggleNativePixels();vm.setTransform(1f)}
                         Text("Pinch — увеличение, перетаскивание — область, двойной тап — 2× / 1×. Долгое нажатие скрывает и возвращает панели. Инструменты измеряют JPEG до LUT.",color=Quiet,fontSize=11.sp)
                     }
-                    "camera"->{RemoteCameraPanel(vm,::openSetting)}
+                    "camera"->{if(vm.isWifi)WifiCameraPanel(vm,::openSetting) else RemoteCameraPanel(vm,::openSetting)}
                     "preview-diagnosis"->{PreviewDiagnosisPanel(vm)}
                     "display"->{
-                        Action("Сравнить яркость фото / видео"){menu="preview-diagnosis"}
+                        if(!vm.isWifi)Action("Сравнить яркость фото / видео"){menu="preview-diagnosis"}
                         Text("Яркость дисплея телефона",color=Quiet,fontSize=12.sp)
                         Slider(value=if(vm.screenBrightness<0f).5f else vm.screenBrightness,onValueChange={vm.setBrightness(it)},valueRange=.05f..1f)
                         Action("Системная яркость"){vm.setBrightness(-1f)}
@@ -268,10 +268,12 @@ private fun FieldMonitorBody(vm:MonitorViewModel){
                         Text("MP4-превью: исходные USB-кадры, без LUT, интерфейса и звука. Запись на SD GH5 управляется отдельно.",fontSize=11.sp,color=Quiet)
                     }
                     "connection"->{
+                        Action(if(vm.isWifi)"Перейти на USB" else "Подключиться по Wi-Fi"){vm.showConnectionSetup(!vm.isWifi);menu=null}
+
                         Text(vm.statusText,color=Accent,fontSize=12.sp)
                         Text(vm.performanceText,color=Quiet,fontSize=11.sp)
                         Text("Кадров: ${vm.frameCount}\nJPEG: ${vm.actualFrameSize ?: "—"}\nСчётчик FPS — превью, не частота записи GH5.",fontSize=11.sp,color=Quiet)
-                        Action("Качество USB-превью"){quality=true}
+                        if(vm.isWifi)Action("Wi-Fi: качество и управление"){menu="camera"} else Action("Качество USB-превью"){quality=true}
                         Action("Обновить журнал"){vm.refreshDiagnostics()}
                         Action("Проверка режимов живью"){if(!vm.isDemo)vm.probeLiveview()}
                         Action("Список значений GH5"){if(!vm.isDemo)vm.logAllowedValues()}
@@ -305,8 +307,8 @@ private fun Rail(label:String,value:String,active:Boolean?=null,horizontal:Boole
 
 @Composable
 private fun ShutterButton(vm:MonitorViewModel,modifier:Modifier){
-    val enabled=!vm.capturePending
-    val t=vm.remoteControl.telemetry
+    val enabled=!vm.capturePending && !(vm.isWifi && vm.wifi.commandBusy)
+    val t=vm.cameraTelemetry
     val recording=t.recording==true && android.os.SystemClock.elapsedRealtime()-t.observedAtMs<4500
     Box(modifier.height(88.dp).semantics(mergeDescendants=true){contentDescription=if(recording)"Остановить запись GH5" else "Спуск ${if(enabled)"●" else "…"}"}
         .clickable(enabled=enabled,role=Role.Button){vm.shutter()},contentAlignment=Alignment.Center){
