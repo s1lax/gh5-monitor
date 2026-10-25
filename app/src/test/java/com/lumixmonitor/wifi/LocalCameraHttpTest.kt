@@ -23,7 +23,7 @@ class LocalCameraHttpTest {
     @Test fun hotspotRouteMustActuallyContainTheCamera(){
         fun ip(v:String)=InetAddress.getByName(v).address
         assertTrue(sameIpv4Subnet(ip("192.168.43.1"),ip("192.168.43.212"),24))
-        assertFalse(sameIpv4Subnet(ip("192.168.1.39"),ip("192.168.43.212"),24))
+        assertFalse(sameIpv4Subnet(ip("192.168.19.10"),ip("192.168.43.212"),24))
         assertFalse(sameIpv4Subnet(ip("192.168.43.1"),ip("192.168.43.212"),0))
         assertTrue(sameIpv4Subnet(ip("172.20.10.1"),ip("172.20.10.6"),28))
     }

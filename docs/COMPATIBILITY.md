@@ -37,4 +37,3 @@ Scopes and display corrections operate on the preview, not RAW or guaranteed cal
 ## Report another configuration
 
 Open an Issue with camera model, firmware, phone model, Android version, lens, cable / OTG setup, actual JPEG dimensions, selected quality and what worked. Separate camera SD recording from phone proxy recording. Include reproducible steps and redacted logs; never include your camera serial number or private photos by default.
-
