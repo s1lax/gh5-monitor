@@ -12,7 +12,8 @@ This is the first public GH5-focused release. Earlier version entries summarize 
 - Keep native MF Assist, touch AF, original-file transfer and comparison diagnosis USB-only for now.
 - Preserve an arriving UDP stream across control timeouts, tolerate a busy stream start on reconnect, and prevent a watchdog START immediately after a successful START.
 - Add received FPS, bitrate, packet-gap diagnostics and a Wi-Fi performance profile comparison on Android 10–13.
-- 106 JVM tests pass, including 24 Wi-Fi protocol / recovery tests. Direct GH5 live view, quality changes, ISO readback, REC / STOP and four orientations were checked. Motion-associated receive stalls remain under investigation; no guaranteed-FPS or zero-latency claim.
+- Add matching phone-hotspot interface support, multicast discovery on that interface and a bounded local HTTP socket path. A 5 GHz phone hotspot carried preview successfully but performed worse than direct camera Wi-Fi on the development pair; it is an option, not a claimed latency fix.
+- 111 JVM tests pass, including 29 Wi-Fi protocol / recovery / local HTTP tests. Direct GH5 live view, quality changes, ISO readback, REC / STOP and four orientations were checked. Motion-associated receive stalls remain under investigation; no guaranteed-FPS or zero-latency claim.
 
 ## 0.5.3-gh5 — Photo/video brightness diagnosis
 

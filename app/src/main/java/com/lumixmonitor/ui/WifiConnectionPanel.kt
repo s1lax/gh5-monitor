@@ -20,6 +20,7 @@ internal fun WifiConnectPanel(vm:MonitorViewModel){
     val wifi=vm.wifi;val context=LocalContext.current
     var address by remember(wifi.address){mutableStateOf(wifi.address)}
     Text("На GH5: Wi-Fi → New Connection → Remote Shooting & View. Подключите телефон к сети камеры и выберите «Оставаться подключённым», даже если нет интернета. USB камеры отключите.",fontSize=14.sp)
+    Text("Для раздачи с телефона: включите точку доступа 5 ГГц и подключите к ней GH5 через Via Network. Здесь нужен IP камеры из списка клиентов точки доступа; попробуйте кнопку поиска ниже.",fontSize=12.sp,color=MaterialTheme.colorScheme.onSurfaceVariant)
     Spacer(Modifier.height(12.dp))
     OutlinedTextField(address,{address=it},label={Text("IP камеры (обычно 192.168.54.1)")},singleLine=true,modifier=Modifier.fillMaxWidth())
     Spacer(Modifier.height(10.dp))

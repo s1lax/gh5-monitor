@@ -14,6 +14,14 @@ You can also join both devices to one router using the camera's **Via Network** 
 
 For development over ADB, a direct camera network usually disconnects ADB over the home Wi-Fi. Connect the **phone to the computer by USB**, leaving the camera USB disconnected, to keep logs and installation access.
 
+## Phone hotspot
+
+The phone can also provide the network. Enable a 5 GHz / WPA2 hotspot in Android, then connect GH5 using **Remote Shooting & View → Via Network**. The camera is the Wi-Fi client in this arrangement. The camera address is assigned by the phone and will usually differ from `192.168.54.1`; enter the address shown in the hotspot's client list or try camera discovery. No Internet / cellular connection is needed for the local camera data itself.
+
+Android does not always expose its hotspot as a normal Wi-Fi `Network`. This transport recognizes a matching local Wi-Fi/hotspot interface, binds UDP and a bounded local HTTP socket to that interface's IPv4 address, and prefers it over an unrelated default network.
+
+**Development result:** a OnePlus 8 Pro hotspot at 5180 MHz successfully carried camera access, HTTP control and 640×360 UDP preview, both with and without a simultaneous home-network connection. It did **not** improve this setup: video arrived in bursts with roughly 0.7-second gaps, and a separate 60-packet ICMP test had about 269 ms average / 1016 ms maximum RTT with no packet loss. JPEG decoding remained around 4 ms. The test was ended and direct camera Wi-Fi was restored. This is a result for this device pair, not a claim that all phone hotspots perform worse. No handset root or Internet connection was used.
+
 ## Controls and limits
 
 The existing display tools work on received Wi-Fi frames: app peaking, zebra, guides, scopes, LUT, display correction, 1:1 inspection, preview JPEG saving and silent phone MP4 proxies. These are previews, not original stills or the camera's internal movie recording.

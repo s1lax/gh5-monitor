@@ -14,7 +14,7 @@ The app requires Android 8.0+ and USB Host support. Original-file saving and dia
 
 ## Experimental Wi-Fi branch
 
-Version 0.6.0 adds a local HTTP / UDP transport for Remote Shooting & View, independent of USB PTP. The build and 106 JVM tests pass, and the APK is installed on the development phone. Direct GH5 connection delivered VGA 640×360 and QVGA 320×184 at approximately 30 fps in steady periods. ISO write/readback and restoration, REC / STOP and four orientations were checked. Motion-associated receive stalls and recovery are still under investigation; shared-router operation, other hardware and every exposed setting remain unverified. These checks do not inherit USB's hardware results. See [Wi-Fi setup and limitations](WIFI.md).
+Version 0.6.0 adds a local HTTP / UDP transport for Remote Shooting & View, independent of USB PTP. The build and 111 JVM tests pass, and the APK is installed on the development phone. Direct GH5 connection delivered VGA 640×360 and QVGA 320×184 at approximately 30 fps in steady periods. ISO write/readback and restoration, REC / STOP and four orientations were checked. The phone's 5 GHz hotspot also carried video, but performed worse on the tested pair. Motion-associated receive stalls and recovery are still under investigation; shared-router operation, other hardware and every exposed setting remain unverified. These checks do not inherit USB's hardware results. See [Wi-Fi setup and limitations](WIFI.md).
 
 ## Validation levels
 
@@ -37,3 +37,4 @@ Scopes and display corrections operate on the preview, not RAW or guaranteed cal
 ## Report another configuration
 
 Open an Issue with camera model, firmware, phone model, Android version, lens, cable / OTG setup, actual JPEG dimensions, selected quality and what worked. Separate camera SD recording from phone proxy recording. Include reproducible steps and redacted logs; never include your camera serial number or private photos by default.
+

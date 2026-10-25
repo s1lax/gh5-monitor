@@ -2,7 +2,7 @@
 
 ## 0.6.0-gh5 Wi-Fi branch
 
-The current build passes **106 JVM tests**, including 24 Wi-Fi parsing, setting-token and recovery tests. The debug APK is installed on the development OnePlus 8 Pro / Android 13.
+The current build passes **111 JVM tests**, including 29 Wi-Fi parsing, setting-token, bounded local HTTP and recovery tests. The debug APK is installed on the development OnePlus 8 Pro / Android 13.
 
 Hardware checks so far:
 
@@ -11,9 +11,10 @@ Hardware checks so far:
 - ISO 100 → 125 write/readback and restoration to 100.
 - Video recording was confirmed by camera telemetry; STOP was sent and recording-off was confirmed.
 - Four screen orientations with a centered shutter and the same Wi-Fi session.
+- A phone-provided 5 GHz hotspot successfully carried camera HTTP and UDP preview, but delivered bursty video and high independent ICMP RTT on the tested pair. Disabling the phone's simultaneous STA connection did not resolve it. Direct camera Wi-Fi was restored after the experiment.
 - App rendering and JPEG decoding remained fast during a reported receive-rate collapse. Logs showed control timeouts alongside UDP delivery gaps; the early implementation then closed a still-live video receiver. Recovery now treats the paths separately, with regression tests for this condition and the premature START watchdog issue.
 
-**Unresolved / pending:** motion-associated radio or camera stalls, long-run reliability after the latest recovery fix, exact end-to-end latency, shared-router operation, AF / still capture and every setting on the Wi-Fi path. The user described steady-period lag as almost unnoticeable, which is subjective feedback rather than a latency measurement. No personal scene images, device identifiers or raw network logs are published.
+**Unresolved / pending:** motion-associated radio or camera stalls, long-run reliability after the latest recovery fix, exact end-to-end latency, shared-router operation, AF / still capture and every setting on the Wi-Fi path. The recovery fix retained a single session through control outages and returned to approximately 30 fps, but prolonged gaps in received video remained. The user described steady-period lag as almost unnoticeable, which is subjective feedback rather than a latency measurement. No personal scene images, device identifiers or raw network logs are published.
 
 ## 0.5.3-gh5
 
