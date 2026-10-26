@@ -12,8 +12,8 @@ android {
         applicationId = "com.lumixmonitor.gh5"
         minSdk = 26
         targetSdk = 34
-        versionCode = 28
-        versionName = "0.6.0-gh5"
+        versionCode = 29
+        versionName = "0.6.1-gh5"
     }
 
     buildTypes {

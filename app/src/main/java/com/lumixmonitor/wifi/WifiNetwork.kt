@@ -8,6 +8,7 @@ import android.net.wifi.WifiManager
 import android.os.SystemClock
 import com.lumixmonitor.ptp.PtpLog
 import java.io.ByteArrayOutputStream
+import java.io.OutputStream
 import java.net.DatagramPacket
 import java.net.DatagramSocket
 import java.net.HttpURLConnection
@@ -54,6 +55,46 @@ class WifiNetwork(private val context:Context,val endpoint:CameraEndpoint) {
         }catch(t:Throwable){PtpLog.add("WIFI HTTP $mode ${params["type"] ?: ""}: ${t.javaClass.simpleName} ${t.message}");throw t}
     }
     fun description():String=get(URL("http://${endpoint.host}:60606/Lumix/Server0/ddd"),1000)
+    fun browse(body:String):String {
+        val out=ByteArrayOutputStream()
+        transfer(URL("http://${endpoint.host}:60606/Server0/CDS_control"),out,2_097_152,body.toByteArray(Charsets.UTF_8))
+        return out.toString("UTF-8")
+    }
+    fun file(url:String,out:OutputStream,limit:Long,progress:(Long)->Unit={}):Long {
+        WifiCardFiles.resource(url,endpoint.host)
+        return transfer(URL(url),out,limit,null,progress)
+    }
+    private fun transfer(url:URL,out:OutputStream,limit:Long,body:ByteArray?=null,progress:(Long)->Unit={}):Long {
+        check(!closed){"Wi-Fi session closed"}
+        val timeout=if(body==null)8000 else 3500
+        if(network==null && localAddress!=null && !endpoint.host.startsWith("127.")){
+            val socket=Socket();activeSocket.set(socket)
+            try{
+                socket.soTimeout=timeout;socket.bind(InetSocketAddress(localAddress,0));socket.connect(InetSocketAddress(url.host,url.port),2500)
+                val headers=if(body==null)"" else "Content-Type: text/xml; charset=\"utf-8\"\r\nSOAPACTION: \"urn:schemas-upnp-org:service:ContentDirectory:1#Browse\"\r\nContent-Length: ${body.size}\r\n"
+                val request="${if(body==null)"GET" else "POST"} ${url.file} HTTP/1.1\r\nHost: ${url.authority}\r\nUser-Agent: Panasonic MIL DLNA CP UPnP/1.0\r\n${headers}Connection: close\r\n\r\n"
+                socket.getOutputStream().apply{write(request.toByteArray(Charsets.US_ASCII));if(body!=null)write(body);flush()}
+                return LocalCameraHttp.copy(socket.getInputStream(),out,limit){check(!closed){"Transfer cancelled"};progress(it)}
+            }finally{activeSocket.compareAndSet(socket,null);socket.close()}
+        }
+        val conn=(network?.openConnection(url,Proxy.NO_PROXY) ?: url.openConnection(Proxy.NO_PROXY)) as HttpURLConnection
+        activeHttp.set(conn)
+        try{
+            conn.connectTimeout=2500;conn.readTimeout=timeout;conn.instanceFollowRedirects=false;conn.useCaches=false
+            conn.setRequestProperty("User-Agent","Panasonic MIL DLNA CP UPnP/1.0")
+            conn.setRequestProperty("Connection","close")
+            check(!closed){"Transfer cancelled"}
+            if(body!=null){conn.requestMethod="POST";conn.doOutput=true;conn.setFixedLengthStreamingMode(body.size)
+                conn.setRequestProperty("Content-Type","text/xml; charset=\"utf-8\"")
+                conn.setRequestProperty("SOAPACTION","\"urn:schemas-upnp-org:service:ContentDirectory:1#Browse\"")
+                conn.outputStream.use{it.write(body)}}
+            require(conn.responseCode==200){"Camera file HTTP ${conn.responseCode}"};require(conn.contentLengthLong<=limit){"Camera file too large"}
+            var count=0L;conn.inputStream.use{input->val bytes=ByteArray(32768);while(true){check(!closed){"Transfer cancelled"};val n=input.read(bytes);if(n<0)break
+                require(count+n<=limit){"Camera file too large"};out.write(bytes,0,n);count+=n;progress(count)}}
+            if(conn.contentLengthLong>=0)require(count==conn.contentLengthLong){"Incomplete camera file"}
+            return count
+        }finally{activeHttp.compareAndSet(conn,null);conn.disconnect()}
+    }
     private fun get(url:URL,timeoutMs:Int):String {
         check(!closed){"Wi-Fi session closed"}
         if(network==null && localAddress!=null && !endpoint.host.startsWith("127."))return localRequest(url,timeoutMs)

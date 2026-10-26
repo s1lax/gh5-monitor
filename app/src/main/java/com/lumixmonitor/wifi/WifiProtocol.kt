@@ -129,6 +129,7 @@ class WifiSettingsCatalog {
             } ?: "—"
             "exposure"->value.toDoubleOrNull()?.let{String.format(Locale.US,"%+.1f",it/3)} ?: value
             "liveviewsize"->when(value){"vga"->"VGA";"qvga"->"QVGA";else->value}
+            "whitebalance"->when(value){"color_temp1","color_temp2","color_temp3","color_temp4"->"K${value.last()}";"white_set1","white_set2","white_set3","white_set4"->"WB ${value.last()}";"auto"->"AWB";"auto_warm"->"AWBw";"auto_cool"->"AWBc";else->value}
             else->value
         }
     }

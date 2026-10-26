@@ -2,11 +2,16 @@ package com.lumixmonitor.wifi
 
 import java.io.ByteArrayOutputStream
 import java.io.InputStream
+import java.io.OutputStream
 
 /** Bounded HTTP/1 response reader for sockets bound to the phone's hotspot address. */
 internal object LocalCameraHttp {
     private const val LIMIT=2_097_152
     fun body(input:InputStream):String {
+        val out=ByteArrayOutputStream();copy(input,out,LIMIT.toLong());return out.toString("UTF-8")
+    }
+    fun copy(input:InputStream,out:OutputStream,limit:Long,progress:(Long)->Unit={}):Long {
+        require(limit in 1..1_073_741_824L);var copied=0L
         fun line():String {
             val out=ByteArrayOutputStream()
             while(true){val b=input.read();require(b>=0){"Truncated camera HTTP header"}
@@ -25,28 +30,27 @@ internal object LocalCameraHttp {
             require(name !in headers || name !in listOf("content-length","transfer-encoding")){"Duplicate camera HTTP framing header"}
             headers[name]=l.substringAfter(':').trim()
         }
-        val out=ByteArrayOutputStream()
-        fun exact(length:Int){
-            require(length>=0 && length<=LIMIT-out.size()){ "Camera reply too large" }
+        fun exact(length:Long){
+            require(length>=0 && length<=limit-copied){ "Camera reply too large" }
             val buffer=ByteArray(8192);var left=length
-            while(left>0){val n=input.read(buffer,0,minOf(left,buffer.size));require(n>0){"Truncated camera HTTP body"};out.write(buffer,0,n);left-=n}
+            while(left>0){val n=input.read(buffer,0,minOf(left,buffer.size.toLong()).toInt());require(n>0){"Truncated camera HTTP body"};out.write(buffer,0,n);left-=n;copied+=n;progress(copied)}
         }
         val encoding=headers["transfer-encoding"]?.lowercase(java.util.Locale.ROOT)
         if(encoding!=null){
             require(encoding=="chunked" && "content-length" !in headers){"Unsupported camera HTTP framing"}
             while(true){val size=line().substringBefore(';').trim().toLongOrNull(16) ?: error("Invalid camera HTTP chunk")
-                require(size in 0..LIMIT.toLong()){ "Camera reply too large" }
+                require(size in 0..limit){ "Camera reply too large" }
                 if(size==0L){var trailers=0;while(line().isNotEmpty()){require(++trailers<=32){"Camera HTTP trailers too large"}};break}
-                exact(size.toInt());require(line().isEmpty()){ "Invalid camera HTTP chunk terminator" }
+                exact(size);require(line().isEmpty()){ "Invalid camera HTTP chunk terminator" }
             }
         }else if("content-length" in headers){
             val length=headers.getValue("content-length").toLongOrNull() ?: error("Invalid camera body length")
-            require(length in 0..LIMIT.toLong()){ "Camera reply too large" };exact(length.toInt())
+            require(length in 0..limit){ "Camera reply too large" };exact(length)
         }else{
             val buffer=ByteArray(8192)
-            while(true){val n=input.read(buffer);if(n<0)break;require(out.size()+n<=LIMIT){"Camera reply too large"};out.write(buffer,0,n)}
+            while(true){val n=input.read(buffer);if(n<0)break;require(copied+n<=limit){"Camera reply too large"};out.write(buffer,0,n);copied+=n;progress(copied)}
         }
-        return out.toString("UTF-8")
+        return copied
     }
 }
 

@@ -2,6 +2,18 @@
 
 This is the first public GH5-focused release. Earlier version entries summarize the local development iterations; separate public release binaries are not provided for every historical version.
 
+## 0.6.1-gh5 — Native Wi-Fi focus, camera status and card files (in development)
+
+- Add native GH5 Wi-Fi MF Assist, camera-returned scale/coordinates, a navigator, ±1× hold controls and native drag/pinch gestures.
+- Add repeated short lens-focus steps with queued-step cancellation on release. GH5 rejects the newer `focus-stop` command, so it is not used.
+- Add touch-coordinate requests with paired release, subject to focus mode and remote-device priority.
+- Show camera battery bars without inventing exact percentages, dual SD status, active slot, remaining capacity, warning and temperature categories.
+- Add card browsing, original-JPEG viewing and original downloads to `Download/GH5 Originals`, with cancellation and playback-to-shooting return. GH5's approximate DIDL file sizes are not used as exact HTTP lengths.
+- Add a visible manual 90° preview-rotation button. UI orientation changes preserve the selected image angle and active connection.
+- Mark stale/frozen frames explicitly; retain existing simultaneous peaking, zebra and framing tools.
+- Preserve brightness processing and camera preview resolution. No 4K Wi-Fi or zero-latency claim.
+- 119 JVM tests pass. See `docs/VALIDATION.md` for hardware checks and remaining limits.
+
 ## 0.6.0-gh5 — Wi-Fi connection (in development)
 
 - Add direct-camera / shared-LAN Wi-Fi connection, manual local address and bounded SSDP discovery.

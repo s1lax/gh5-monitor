@@ -14,22 +14,22 @@ Created and tested by **[s1lax](https://github.com/s1lax)**, developed with **GP
 
 > **Experimental, first public preview: 0.5.3-gh5.** The app has been tested with one GH5 and one phone, not a broad compatibility matrix. The current in-app labels are Russian; this repository's documentation is in English. Contributions for English UI localization are welcome.
 
-The `feature/wifi-monitor` branch adds **0.6.0-gh5** Wi-Fi support using local camera HTTP commands and UDP JPEG preview. The published 0.5.3 release remains USB-only. Wi-Fi hardware validation is in progress; see the [Wi-Fi guide](docs/WIFI.md) for setup, scope and latency limits.
+The `feature/wifi-monitor` branch adds **0.6.1-gh5** Wi-Fi support using local camera HTTP commands and UDP JPEG preview, including native MF Assist and card browsing. The published 0.5.3 release remains USB-only. See the [Wi-Fi guide](docs/WIFI.md) for setup, verified behavior and latency limits.
 
 ## What it can do
 
 | Area | Features |
 | --- | --- |
 | USB live view | Camera-advertised quality selection, JPEG preview, recovery after temporary interruptions, performance diagnostics |
-| Wi-Fi preview (0.6.0 branch) | Direct camera hotspot or a shared LAN, local-IP entry / SSDP discovery, newest-frame UDP decoding, basic remote controls and camera-advertised setting choices |
-| Field monitor UI | Portrait and landscape layouts, large centered shutter control, clean view, independent tools that can be enabled together |
+| Wi-Fi preview (0.6.1 branch) | Direct hotspot or shared LAN, local-IP entry / SSDP discovery, newest-frame UDP decoding, explicit frozen-frame warning, camera controls and advertised setting choices |
+| Field monitor UI | Portrait and landscape layouts, centered shutter, clean view, simultaneous tools, visible manual preview-rotation button independent of UI orientation |
 | Focus | **Camera-native MF Assist**, remembered phone-selected area, navigator, hold-to-repeat movement and ±1× magnification; separate 1:1 display inspection and app focus peaking |
-| Exposure tools | Zebra, false color, histogram / RGB histogram, waveform and vectorscope, calculated from the USB preview |
+| Exposure tools | Zebra, false color, histogram / RGB histogram, waveform and vectorscope, calculated from the received preview |
 | Framing | Rule of thirds, center marker, aspect guides, safe area, camera level, image rotation and anamorphic desqueeze |
 | Viewing | Import `.cube` 3D LUTs, adjustable LUT strength, display-only EV / gamma / contrast correction |
 | Camera control | ISO, shutter, aperture, exposure compensation and WB through scrolling value selectors; AF, shutter, video REC / STOP, supported profile and video settings |
-| Camera status | Battery, recording state and timer, available exposure / AF / remaining-capacity data |
-| Files | Save the original USB preview JPEG; record a silent MP4 preview on the phone; browse recent camera stills and transfer original JPEG / RW2 files where supported |
+| Camera status | Recording state, available exposure / AF / capacity data; Wi-Fi adds dual-slot status, camera battery bars, temperature category and warnings |
+| Files | Save preview JPEGs; record a silent phone MP4 proxy; browse camera stills and transfer originals where supported, including verified JPEG transfers over Wi-Fi |
 | Diagnosis | Capture matched photo/video preview stages with read-only camera parameters and export JPEG + PNG + JSON as a ZIP |
 | Demo | Local moving test scene without a camera |
 
@@ -57,7 +57,8 @@ Other Lumix models, including the upstream project's S5 target, have **not** bee
 ## Known limitations
 
 - Phone and GH5 LCD brightness can differ, particularly between photo and video modes. **The cause is unresolved.** Version 0.5.3 adds controlled comparison captures, not an automatic exposure or gamma fix. Scopes describe the received JPEG, not RAW exposure or guaranteed calibrated IRE.
-- Native MF Assist moves and magnifies the camera image before USB transmission. Its navigator shows the **last area requested by the phone**; physical GH5 joystick movements and the camera's remembered position are not read back.
+- Native MF Assist magnifies the camera image before transmission. USB navigation shows the last phone-requested area. Wi-Fi navigation uses coordinates and scale returned by GH5 after commands, including native rounding. Neither path continuously tracks physical-body joystick changes.
+- Wi-Fi native focus controls required **Priority of Remote Device → Smartphone** on the tested GH5. This gives the phone priority and limits physical camera controls; the app does not silently change that setting. Wi-Fi source resolution remains below USB.
 - Tap AF, motorized MF hold/release, RW2 transfer and the full set of video/profile settings still need broader hardware validation. JPEG original transfer and REC / STOP were checked on the development setup.
 - Backgrounding the app can interrupt USB. Recovery handles many temporary failures, but some sessions still require unplugging and reconnecting the camera. Camera hangs requiring a power cycle were reported during development; this has not been proven impossible in all states.
 - App overlays can coexist with any overlays already present in the received preview. Camera-side peaking / zebra availability should be checked on the actual camera and mode.

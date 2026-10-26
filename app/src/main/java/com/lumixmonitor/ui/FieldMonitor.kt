@@ -80,8 +80,11 @@ private fun FieldMonitorBody(vm:MonitorViewModel){
     var quality by remember{mutableStateOf(false)}
     var clean by remember{mutableStateOf(false)}
     var cleanHint by remember{mutableStateOf(false)}
-    BackHandler(enabled=clean || menu!=null || vm.selectingAssist){clean=false;menu=null;vm.cancelAssistSelection()}
+    BackHandler(enabled=clean || menu!=null || vm.selectingAssist || (vm.isWifi && vm.wifi.gallery)){
+        if(vm.isWifi && vm.wifi.gallery)vm.wifi.cardFiles.back() else {clean=false;menu=null;vm.cancelAssistSelection()}
+    }
     LaunchedEffect(clean){cleanHint=clean;if(clean){delay(3000);cleanHint=false}}
+    LaunchedEffect(vm.wifi.gallery){if(vm.wifi.gallery){menu=null;clean=false}}
     val tools=vm.tools
     val frame=vm.displayFrame
     val context=LocalContext.current
@@ -104,17 +107,25 @@ private fun FieldMonitorBody(vm:MonitorViewModel){
         Rail(label,value,horizontal=horizontal,cellWidth=width,cellHeight=height){openSetting(kind)}
     }
     val preview: @Composable ()->Unit = {
-        Box(Modifier.fillMaxSize(),contentAlignment=Alignment.Center){
+        Column(Modifier.fillMaxSize()){
+        Box(Modifier.weight(1f).fillMaxWidth(),contentAlignment=Alignment.Center){
             if(frame==null)Text("Ожидание кадра…",color=Quiet) else CameraViewport(vm,frame,allowTouchAf=!clean,onTap={if(clean)clean=false},onLongPress={clean=!clean;menu=null})
-            if((vm.cameraFocusAssist || vm.selectingAssist) && !clean && !vm.isDemo)AssistNavigator(vm.remoteControl,vm.previewQuarterTurns,Modifier.align(Alignment.BottomEnd).padding(6.dp).width(164.dp),showScale=true,scaleEnabled=vm.cameraFocusAssist)
+            if((vm.focusAssistActive || vm.selectingAssist) && !clean && !vm.isDemo){
+                val nav=Modifier.align(Alignment.BottomEnd).padding(6.dp).width(164.dp)
+                if(vm.isWifi)WifiAssistNavigator(vm,nav) else AssistNavigator(vm.remoteControl,vm.previewQuarterTurns,nav,showScale=true,scaleEnabled=vm.cameraFocusAssist)
+            }
+            if(vm.isWifi)WifiFrameNotice(vm,Modifier.align(Alignment.TopCenter))
+            if(vm.heldFrame!=null)Text("СТОП-КАДР",color=Color(0xFFFFCC80),modifier=Modifier.align(Alignment.TopStart).background(Panel).padding(6.dp))
+        }
+        if(vm.isWifi && !clean)WifiStatusStrip(vm){menu="camera"}
         }
     }
-    val assistLabel=if(vm.focusAssistPending)"…" else if(vm.selectingAssist)"◎" else "MF"
+    val assistLabel=if(vm.assistPending)"…" else if(vm.selectingAssist)"◎" else "MF"
     val t=vm.cameraTelemetry
     val actualRec=t.recording==true && android.os.SystemClock.elapsedRealtime()-t.observedAtMs<4500
     val connectionLabel=if(actualRec)"● REC" else if(vm.proxyRecording)"● MP4" else if(vm.isDemo)"DEMO" else if(vm.isWifi)"Wi-Fi" else "USB"
     val fps=Regex("([0-9.]+) FPS").find(vm.performanceText)?.groupValues?.get(1)?.let{"$it fps"} ?: "—"
-    val cameraStatus=((t.battery ?: vm.cameraBattery)?.let{"GH5 $it%"} ?: "GH5 —")+if(vm.neutralPreview)" · USB без LUT" else if(vm.displayCalibration.isAdjusted)" · V" else ""
+    val cameraStatus=(if(vm.isWifi)"GH5 ${vm.wifi.cameraStatus.battery?.label ?: "—"}" else (t.battery ?: vm.cameraBattery)?.let{"GH5 $it%"} ?: "GH5 —")+if(vm.neutralPreview)" · USB без LUT" else if(vm.displayCalibration.isAdjusted)" · V" else ""
     var captureNotice by remember{mutableStateOf(false)}
     LaunchedEffect(vm.captureFeedback){captureNotice=vm.captureFeedback.isNotEmpty();if(captureNotice){delay(4000);captureNotice=false}}
 
@@ -131,7 +142,8 @@ private fun FieldMonitorBody(vm:MonitorViewModel){
                         Text("$connectionLabel · $fps",color=Accent,fontSize=12.sp)
                         Text(cameraStatus,color=Quiet,fontSize=10.sp)
                     }
-                    Rail("Чистый","↔",horizontal=true,cellWidth=64.dp){clean=true;menu=null}
+                    Rail("${vm.previewQuarterTurns*90}°","↻",horizontal=true,cellWidth=48.dp){vm.rotatePreview()}
+                    Rail("Чистый","↔",horizontal=true,cellWidth=56.dp){clean=true;menu=null}
                 }
                 Row(Modifier.fillMaxWidth(),verticalAlignment=Alignment.CenterVertically){QuickTools(true,controlsWidth/3,54.dp)}
                 Box(Modifier.weight(1f).fillMaxWidth()){preview()}
@@ -144,7 +156,7 @@ private fun FieldMonitorBody(vm:MonitorViewModel){
                     Setting(SettingKind.EXPOSURE,"EV",vm.settings.exposureComp,true,controlsWidth/5)
                 }
                 Row(Modifier.fillMaxWidth().height(88.dp).padding(horizontal=12.dp),verticalAlignment=Alignment.CenterVertically){
-                    Box(Modifier.weight(1f),contentAlignment=Alignment.Center){Rail("Лупа GH5",assistLabel,vm.cameraFocusAssist,horizontal=true,cellWidth=88.dp,enabled=!vm.focusAssistPending && !vm.isWifi){vm.toggleFocusAssist()}}
+                    Box(Modifier.weight(1f),contentAlignment=Alignment.Center){Rail("Лупа GH5",assistLabel,vm.focusAssistActive,horizontal=true,cellWidth=88.dp,enabled=!vm.assistPending){vm.toggleFocusAssist()}}
                     ShutterButton(vm,Modifier.width(88.dp))
                     Box(Modifier.weight(1f),contentAlignment=Alignment.Center){Rail("Фокус","AF",horizontal=true,cellWidth=88.dp){vm.autoFocus()}}
                 }
@@ -158,7 +170,8 @@ private fun FieldMonitorBody(vm:MonitorViewModel){
                         QuickTools(false,62.dp,cellHeight)
                         Rail("Фокус","AF",cellHeight=cellHeight){vm.autoFocus()}
                     }
-                    Rail("Чистый","↔"){clean=true;menu=null}
+                    Rail("${vm.previewQuarterTurns*90}°","↻",cellHeight=44.dp){vm.rotatePreview()}
+                    Rail("Чистый","↔",cellHeight=44.dp){clean=true;menu=null}
                     Text(connectionLabel,color=if(vm.isDemo)Color(0xFFFFCC80) else Accent,fontSize=10.sp)
                     Text(fps,color=Quiet,fontSize=8.sp)
                     Text(cameraStatus,color=Quiet,fontSize=8.sp,maxLines=1)
@@ -175,12 +188,13 @@ private fun FieldMonitorBody(vm:MonitorViewModel){
                     Column(Modifier.weight(1f).fillMaxWidth(),verticalArrangement=Arrangement.SpaceEvenly){
                         Setting(SettingKind.WHITE_BALANCE,"ББ",compactWb(vm.settings.whiteBalance),height=cellHeight)
                         Setting(SettingKind.EXPOSURE,"EV",vm.settings.exposureComp,height=cellHeight)
-                        Rail("Лупа GH5",assistLabel,vm.cameraFocusAssist,enabled=!vm.focusAssistPending && !vm.isWifi,cellHeight=cellHeight){vm.toggleFocusAssist()}
+                        Rail("Лупа GH5",assistLabel,vm.focusAssistActive,enabled=!vm.assistPending,cellHeight=cellHeight){vm.toggleFocusAssist()}
                     }
                 }
             }
         }
         if(captureNotice && !clean)Text(vm.captureFeedback,color=Color.White,fontSize=12.sp,modifier=Modifier.align(Alignment.TopCenter).padding(top=if(portrait)106.dp else 8.dp).background(Panel.copy(alpha=.92f),RoundedCornerShape(5.dp)).padding(9.dp))
+        if(vm.isWifi && vm.wifi.gallery)WifiGalleryPanel(vm)
         if(menu=="value" && selectedSetting!=null && !clean){
             Box(Modifier.fillMaxSize().clickable(interactionSource=remember{androidx.compose.foundation.interaction.MutableInteractionSource()},indication=null){menu=null})
             SettingWheelEditor(vm,selectedSetting!!,Modifier.align(Alignment.BottomCenter).widthIn(max=520.dp).fillMaxWidth(),
@@ -219,9 +233,9 @@ private fun FieldMonitorBody(vm:MonitorViewModel){
                         Toggle("Пикинг",tools.focusPeaking){vm.updateTools{it.copy(focusPeaking=!it.focusPeaking)}}
                         ToolSlider("Порог границ",tools.peakingThreshold,String.format("%.2f",tools.peakingThreshold),.02f.. .3f){v->vm.updateTools{it.copy(peakingThreshold=v)}}
                         Action(if(vm.nativePixels)"Пиксели 1:1 ✓" else "Пиксели 1:1"){vm.toggleNativePixels()}
-                        if(!vm.isWifi)Toggle("AF касанием кадра",vm.remoteControl.touchAf){vm.remoteControl.toggleTouchAf()}
+                        Toggle("AF касанием кадра",vm.touchFocusEnabled){vm.toggleTouchFocus()}
                         Action("Автофокус GH5"){vm.autoFocus()}
-                        if(!vm.isWifi)Action("Лупа GH5 / выбрать область"){menu=null;vm.toggleFocusAssist()}
+                        Action("Лупа GH5 / выбрать область"){menu=null;vm.toggleFocusAssist()}
                         Action("Полное управление фокусом GH5"){menu="camera"}
                         Text("Шаги MF, режим и зона AF, блокировка AF/AE — в разделе «Камера → Фокус». Масштаб ±1× доступен на навигаторе, когда включена лупа.",color=Quiet,fontSize=12.sp)
                         }
@@ -238,7 +252,7 @@ private fun FieldMonitorBody(vm:MonitorViewModel){
                         Action("Настроить LUT и экран"){menu="display"}
                         }
                         Action("Сбросить увеличение"){if(vm.nativePixels)vm.toggleNativePixels();vm.setTransform(1f)}
-                        Text("Pinch — увеличение, перетаскивание — область, двойной тап — 2× / 1×. Долгое нажатие скрывает и возвращает панели. Инструменты измеряют JPEG до LUT.",color=Quiet,fontSize=11.sp)
+                        Text(if(vm.isWifi)"Двойной тап — лупа GH5. В лупе: pinch — масштаб, перетаскивание — область. ↻ поворачивает только изображение. Долгое нажатие скрывает и возвращает панели. Инструменты измеряют JPEG до LUT." else "Pinch — увеличение, перетаскивание — область, двойной тап — 2× / 1×. Долгое нажатие скрывает и возвращает панели. Инструменты измеряют JPEG до LUT.",color=Quiet,fontSize=11.sp)
                     }
                     "camera"->{if(vm.isWifi)WifiCameraPanel(vm,::openSetting) else RemoteCameraPanel(vm,::openSetting)}
                     "preview-diagnosis"->{PreviewDiagnosisPanel(vm)}
@@ -298,7 +312,7 @@ private fun FieldMonitorBody(vm:MonitorViewModel){
 @Composable
 private fun Rail(label:String,value:String,active:Boolean?=null,horizontal:Boolean=false,enabled:Boolean=true,cellWidth:Dp=76.dp,repeatable:Boolean=false,cellHeight:Dp=58.dp,onClick:()->Unit){
     val selected=active==true
-    val action=if(repeatable)Modifier.repeatPress(enabled,onClick) else if(active==null)Modifier.clickable(enabled=enabled,role=Role.Button,onClick=onClick) else Modifier.toggleable(value=active,enabled=enabled,role=Role.Checkbox,onValueChange={onClick()})
+    val action=if(repeatable)Modifier.repeatPress(enabled,action=onClick) else if(active==null)Modifier.clickable(enabled=enabled,role=Role.Button,onClick=onClick) else Modifier.toggleable(value=active,enabled=enabled,role=Role.Checkbox,onValueChange={onClick()})
     Column(Modifier.then(if(horizontal)Modifier.width(cellWidth) else Modifier.fillMaxWidth()).height(cellHeight).padding(vertical=3.dp).background(if(selected)Accent.copy(alpha=.17f) else Color.Transparent,RoundedCornerShape(7.dp)).semantics(mergeDescendants=true){contentDescription="$label $value"}.then(action),horizontalAlignment=Alignment.CenterHorizontally,verticalArrangement=Arrangement.Center){
         Text(value,color=if(selected)Accent else if(enabled)Color.White else Quiet,fontSize=if(value.length>8)13.sp else 19.sp,lineHeight=24.sp,fontWeight=FontWeight.Medium,maxLines=1)
         Text(label,color=if(selected)Accent else Quiet,fontSize=11.sp,lineHeight=14.sp,maxLines=1)
@@ -356,12 +370,22 @@ private fun CameraViewport(vm:MonitorViewModel,bitmap:Bitmap,allowTouchAf:Boolea
                 if(touchAfAllowed && vm.selectingAssist){
                     val point=ImageGeometry.sensorPoint(p.x/bounds.width.coerceAtLeast(1),p.y/bounds.height.coerceAtLeast(1),vm.previewQuarterTurns)
                     vm.startFocusAssistAt((point.first*1000).toInt(),(point.second*1000).toInt())
-                }else if(touchAfAllowed && vm.remoteControl.touchAf && !vm.cameraFocusAssist && vm.heldFrame==null && !vm.nativePixels && vm.viewTransform.zoom<=1f){
+                }else if(touchAfAllowed && vm.touchFocusEnabled && !vm.focusAssistActive && vm.heldFrame==null && !vm.nativePixels && vm.viewTransform.zoom<=1f){
                     val point=ImageGeometry.sensorPoint(p.x/bounds.width.coerceAtLeast(1),p.y/bounds.height.coerceAtLeast(1),vm.previewQuarterTurns)
-                    vm.remoteControl.point(point.first,point.second)
+                    vm.pointFocus(point.first,point.second)
                 }else latestTap()
-            },onLongPress={latestLongPress()},onDoubleTap={if(vm.nativePixels)vm.toggleNativePixels();vm.setTransform(if(vm.viewTransform.zoom>1f)1f else 2f)})}
+            },onLongPress={latestLongPress()},onDoubleTap={if(vm.isWifi && vm.heldFrame==null)vm.toggleFocusAssist() else {if(vm.nativePixels)vm.toggleNativePixels();vm.setTransform(if(vm.viewTransform.zoom>1f)1f else 2f)}})}
             .pointerInput(fit.nativeZoom){detectTransformGestures{_,pan,zoom,_->
+                if(vm.isWifi && vm.focusAssistActive){
+                    val a=vm.wifi.assist
+                    if(abs(zoom-1f)>.05f)vm.wifi.stepAssist(zoom>1f)
+                    if(pan.getDistance()>1f){
+                        val delta=ImageGeometry.sensorPoint(.5f-pan.x/bounds.width,.5f-pan.y/bounds.height,vm.previewQuarterTurns)
+                        val origin=ImageGeometry.sensorPoint(.5f,.5f,vm.previewQuarterTurns)
+                        vm.wifi.moveAssist(((a.x ?: 500)+(delta.first-origin.first)*1000).toInt(),((a.y ?: 500)+(delta.second-origin.second)*1000).toInt())
+                    }
+                    return@detectTransformGestures
+                }
                 val old=vm.viewTransform;val z=(old.zoom*zoom).coerceIn(1f,8f)
                 vm.setTransform(z,old.panX-pan.x/bounds.width/z/fit.nativeZoom,old.panY-pan.y/bounds.height/z/fit.nativeZoom,fit.nativeZoom)
             }}){
@@ -369,7 +393,7 @@ private fun CameraViewport(vm:MonitorViewModel,bitmap:Bitmap,allowTouchAf:Boolea
             Canvas(Modifier.fillMaxSize()){
                 fun guide(a:Offset,b:Offset){drawLine(Color.Black.copy(alpha=.65f),a,b,2.dp.toPx());drawLine(Color.White.copy(alpha=.65f),a,b,.6.dp.toPx())}
                 val completeFrame=vm.viewTransform.zoom<=1f && fit.nativeZoom<=1f
-                if(completeFrame && !vm.cameraFocusAssist)vm.remoteControl.focusTarget?.let { target ->
+                if(completeFrame && !vm.focusAssistActive)vm.focusPoint?.let { target ->
                     val p=ImageGeometry.screenPoint(target.first,target.second,vm.previewQuarterTurns)
                     val c=Offset(size.width*p.first,size.height*p.second)
                     val d=13.dp.toPx()

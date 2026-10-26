@@ -261,6 +261,12 @@ class MonitorViewModel(application: Application) : AndroidViewModel(application)
         {text->if(isWifi && !disposed){performanceText=text;PtpLog.add("WIFI PERF $text")}},
         {text->if(isWifi && !disposed){lastError=text;statusText=text;connectionState=ConnectionState.Failed(text)}})
     val cameraTelemetry:com.lumixmonitor.lumix.CameraTelemetry get()=if(isWifi)wifi.telemetry else remoteControl.telemetry
+    val focusAssistActive:Boolean get()=if(isWifi)wifi.assist.active else cameraFocusAssist
+    val assistPending:Boolean get()=if(isWifi)wifi.assistBusy else focusAssistPending
+    val touchFocusEnabled:Boolean get()=if(isWifi)wifi.touchAf else remoteControl.touchAf
+    val focusPoint:Pair<Float,Float>? get()=if(isWifi)wifi.focusTarget else remoteControl.focusTarget
+    fun toggleTouchFocus(){if(isWifi)wifi.toggleTouchAf() else remoteControl.toggleTouchAf()}
+    fun pointFocus(x:Float,y:Float){if(isWifi)wifi.point((x*1000).toInt(),(y*1000).toInt()) else remoteControl.point(x,y)}
     fun wifiType(kind:SettingKind):String?=when(kind){
         SettingKind.ISO->"iso";SettingKind.SHUTTER->"shtrspeed";SettingKind.APERTURE->"focal"
         SettingKind.EXPOSURE->"exposure";SettingKind.WHITE_BALANCE->"whitebalance";SettingKind.PHOTO_STYLE->"photostyle"
@@ -1200,7 +1206,7 @@ class MonitorViewModel(application: Application) : AndroidViewModel(application)
 
     /** Camera-side magnification; no local digital zoom is applied to live USB frames. */
     fun toggleFocusAssist(){
-        if(isWifi){captureFeedback="Камерная лупа пока доступна по USB. По Wi-Fi используйте 1:1 в инструментах фокуса.";return}
+        if(isWifi){nativePixels=false;viewTransform=ViewTransform();heldFrame=null;heldCameraJpeg=null;wifi.toggleAssist();return}
         if (focusAssistPending) return
         if (isDemo) {
             cameraFocusAssist = !cameraFocusAssist

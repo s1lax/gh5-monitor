@@ -41,8 +41,11 @@ internal fun WifiConnectPanel(vm:MonitorViewModel){
 internal fun WifiCameraPanel(vm:MonitorViewModel,openSetting:(SettingKind)->Unit){
     val wifi=vm.wifi;val t=wifi.telemetry;val quiet=Color(0xFF9CA9B5)
     Text("${wifi.model} · Wi-Fi",color=Color(0xFFB4E4CC),fontSize=16.sp)
-    Text("${t.statusText} · батарея ${t.battery?.let{"$it%"} ?: "—"}\n${vm.actualFrameSize ?: "Ожидание кадра"}",color=Color.White,fontSize=13.sp)
+    Text("${t.statusText} · ${vm.actualFrameSize ?: "Ожидание кадра"}",color=Color.White,fontSize=13.sp)
     Text(vm.performanceText,color=quiet,fontSize=11.sp)
+    WifiStateDetails(vm)
+    OutlinedButton({wifi.openGallery()},enabled=t.recording==false && !wifi.commandBusy,modifier=Modifier.fillMaxWidth().heightIn(min=48.dp)){Text("Снимки на карте GH5")}
+    Text("Просмотр карты временно останавливает живую картинку. Оригиналы сохраняются без перекодирования в Download/GH5 Originals.",color=quiet,fontSize=12.sp)
     if(android.os.Build.VERSION.SDK_INT in 29..33){
         Row(verticalAlignment=androidx.compose.ui.Alignment.CenterVertically){
             Switch(wifi.lowLatency,{wifi.chooseLowLatency(it)})
@@ -56,6 +59,7 @@ internal fun WifiCameraPanel(vm:MonitorViewModel,openSetting:(SettingKind)->Unit
     }
     Text("Выберите действие центральной кнопки. При подтверждённом REC она всегда останавливает запись.",color=quiet,fontSize=12.sp)
     OutlinedButton({wifi.command("oneshot_af")},enabled=!wifi.commandBusy,modifier=Modifier.fillMaxWidth().heightIn(min=48.dp)){Text("Автофокус GH5")}
+    WifiFocusControls(vm)
     Row(horizontalArrangement=Arrangement.spacedBy(8.dp)){
         OutlinedButton({wifi.command("capture")},enabled=!wifi.commandBusy,modifier=Modifier.weight(1f).heightIn(min=48.dp)){Text("Снять фото")}
         OutlinedButton({wifi.command(if(t.recording==true)"video_recstop" else "video_recstart")},enabled=!wifi.commandBusy,modifier=Modifier.weight(1f).heightIn(min=48.dp)){Text(if(t.recording==true)"Стоп видео" else "REC видео")}
@@ -71,6 +75,6 @@ internal fun WifiCameraPanel(vm:MonitorViewModel,openSetting:(SettingKind)->Unit
         wifi.choices("liveviewsize").forEach{option->OutlinedButton({wifi.select("liveviewsize",option.id)},enabled=t.recording!=true,modifier=Modifier.heightIn(min=48.dp)){Text(option.label)}}
     }
     if(wifi.choices("liveviewsize").isEmpty())Text("Камера не сообщила выбор качества; используется её текущий режим.",color=quiet,fontSize=12.sp)
-    Text("Камерная лупа, её навигатор, точка AF и оригиналы сейчас доступны по USB. Пикинг, зебра, LUT, графики, направляющие, 1:1 и сохранение превью работают и с Wi-Fi.",color=quiet,fontSize=12.sp)
+    Text("Качество ограничено потоком, который выдаёт GH5. Камерная лупа увеличивает область до передачи; увеличение пикселей в приложении новых деталей не добавляет. Пикинг, зебра, LUT и графики работают по принятому JPEG.",color=quiet,fontSize=12.sp)
     Text(wifi.message,color=Color(0xFFB4E4CC),fontSize=12.sp)
 }

@@ -137,7 +137,7 @@ private fun RemoteButton(text:String,enabled:Boolean=true,action:()->Unit){
 @Composable
 private fun AssistScaleButton(label:String,enabled:Boolean,action:()->Unit){
     Box(Modifier.width(92.dp).height(48.dp).background(Color(0xFF293139),RoundedCornerShape(5.dp))
-        .semantics{contentDescription="Масштаб лупы $label"}.repeatPress(enabled,action),contentAlignment=Alignment.Center){
+        .semantics{contentDescription="Масштаб лупы $label"}.repeatPress(enabled,action=action),contentAlignment=Alignment.Center){
         Text(label,color=if(enabled)RemoteAccent else RemoteQuiet,fontSize=18.sp)
     }
 }

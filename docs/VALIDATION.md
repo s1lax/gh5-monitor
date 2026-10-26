@@ -1,8 +1,24 @@
 # Validation record
 
+## 0.6.1-gh5 Wi-Fi focus and files
+
+**119 JVM tests pass**, with no failures, errors or skipped tests. Added tests cover native assist CSV replies and advertised limits, battery precision, missing/dual-card fields, SOAP/DIDL parsing, unsafe resource URLs, XML entities and bounded binary HTTP transfers.
+
+Checked on the development GH5 and OnePlus 8 Pro / Android 13:
+
+- Native Wi-Fi MF Assist required MF and Smartphone remote-device priority. Start, full-screen mode, ±1× scale changes, held scale controls, center reset, movement and exit were acknowledged by GH5. Its replies included actual scale and quantized area coordinates.
+- A 950 ms held scale control changed 12× to 16× through repeated 1× steps. Releasing the short lens-focus control invalidates queued steps. The newer `focus-stop` command returned `err_param` and was removed from the GH5 path.
+- Center touch in AFS was acknowledged with press/release, the target marker appeared, and remaining still capacity did not change. MF was restored. This checks command handling, not optical focus accuracy for every AF mode.
+- Card listing returned 64 entries with pagination. A 3712×2480 original JPEG opened and its saved 3,490,816 bytes matched an independent camera HTTP read exactly. Its listed DIDL size was only an estimate. Exiting playback resumed fresh live frames.
+- All four UI orientations retained a manually selected 180° preview angle, a centered shutter, visible rotation control and the same Wi-Fi session. The prior user angle was restored afterward.
+- REC and SD1 write activity were confirmed, followed by recording-off. An immediate STOP while START was pending also completed successfully after correcting the command queue.
+- Suspending presentation while leaving reception alive displayed the explicit frozen-frame warning; restoring presentation cleared it. This is a UI-age test, not proof that radio interruptions have been eliminated.
+
+The source is still camera-generated VGA Wi-Fi preview. Long-run radio reliability, RW2/movie transfers, a populated SD2, other bodies/lenses and physical camera-joystick synchronization remain unverified. No personal frames or raw device logs are published.
+
 ## 0.6.0-gh5 Wi-Fi branch
 
-The current build passes **111 JVM tests**, including 29 Wi-Fi parsing, setting-token, bounded local HTTP and recovery tests. The debug APK is installed on the development OnePlus 8 Pro / Android 13.
+That development build passed **111 JVM tests**, including 29 Wi-Fi parsing, setting-token, bounded local HTTP and recovery tests. The debug APK was installed on the development OnePlus 8 Pro / Android 13.
 
 Hardware checks so far:
 

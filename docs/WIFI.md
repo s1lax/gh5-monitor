@@ -1,4 +1,4 @@
-# Wi-Fi monitor (0.6.0 branch)
+# Wi-Fi monitor (0.6.1 branch)
 
 Wi-Fi support is experimental. Direct connection, the reported quality modes, ISO write/readback and video REC / STOP have been checked on the development GH5 and OnePlus 8 Pro / Android 13. The published 0.5.3 APK is USB-only. No router, Internet connection, root or HDMI capture device is required for direct camera Wi-Fi.
 
@@ -28,7 +28,27 @@ The existing display tools work on received Wi-Fi frames: app peaking, zebra, gu
 
 Basic remote operations include autofocus, still capture and video REC / STOP. In the camera menu choose whether the central shutter starts a photo or movie; recent recording telemetry changes it to Stop. This selection changes the button action, not the physical mode dial. ISO, shutter, aperture, exposure compensation, white balance and other options appear only when reported by the camera and can be disabled in its current mode. Settings are sent using Wi-Fi tokens, not USB property codes.
 
-Native camera MF Assist, its navigator, tap AF coordinates, motorized focus controls, original JPEG/RW2 transfers and the photo/video comparison capture are currently USB-only. No claim of USB feature parity is made.
+Native camera MF Assist, navigation, touch-coordinate requests, short manual-focus steps and camera-card browsing are now available over Wi-Fi. The photo/video comparison ZIP tool remains USB-only. Feature availability still depends on camera mode, lens and permissions.
+
+## Native focus and remote priority
+
+On the development GH5, native MF Assist and touch commands were rejected until **Wi-Fi Setup → Priority of Remote Device → Smartphone** was selected and the Wi-Fi session reconnected. This is a camera-side choice: Smartphone priority limits physical camera operation. Camera priority is useful when operating the body, but some app controls may be rejected. The app reports rejection rather than changing priority automatically. See Panasonic's [GH5 Image App guide](https://av.jpn.support.panasonic.com/support/spn/global/dsc/help/image_app/en/camera/DC-GH5/remote.html?no=1).
+
+Select **MF**, then use **Лупа GH5** or double-tap the image. GH5 advertises a full-screen range of 3×–20× and an inset range of 3×–6×. The app requests full-screen assist, uses ±1× steps with press-and-hold, and accepts the camera's actual returned scale and quantized coordinates. Drag the image or use the navigator to move the area; its center button resets the area. The label describes the last camera reply, not continuous physical-joystick tracking. Native magnification operates before the low-resolution Wi-Fi frame is transmitted and does not turn the whole stream into HD or 4K.
+
+**MF ближе / MF дальше** send short focus steps while held. Release cancels queued repetitions; an already accepted step may finish. The GH5 returned `err_param` for the newer `focus-stop` command, which is deliberately not used. **AF касанием кадра** requires a compatible autofocus mode/area; a camera acknowledgement does not prove optical focus was achieved.
+
+## Status and card files
+
+The status strip shows recording, active SD slot, remaining video capacity, camera-reported battery bars, card-full/write warnings and non-normal temperature categories where supplied. The camera menu has details for both slots, remaining photos, grip battery and warnings. Missing data stays unknown. A four-bar battery reading is not an exact percentage, and a temperature category is not degrees Celsius.
+
+Open **Камера → Снимки на карте GH5** while idle. Browsing pauses live view and switches GH5 to playback; exit returns to shooting and restarts the stream. Files are paginated, including an end-of-list shortcut. JPEG viewing loads the original when offered, with a 24 MiB input bound and a decoded preview bounded to 2048 pixels on the long edge. **Сохранить оригинал** saves the camera bytes without re-encoding to `Download/GH5 Originals` on Android 10+. A JPEG already loaded for viewing is reused rather than downloaded again. Other offered originals are streamed with a 1 GiB bound; partial/cancelled files are removed. No deletion or formatting command is provided.
+
+GH5's DIDL list reported every original JPEG as 5,000,000 bytes in testing, including a real 3,490,816-byte file. Transfers therefore validate actual HTTP framing, not that approximate listing field. JPEG saving was independently checked byte-for-byte. RW2, video downloads and a populated second card remain unverified; unavailable camera resources are shown explicitly. Resource URLs are restricted to the connected camera's HTTP file server, without redirects.
+
+## Orientation and frozen frames
+
+Phone rotation rearranges the controls. The visible **↻** button rotates only the preview in 90° increments and saves that angle independently. Guides, AF coordinates and assist navigation use the same transform. A frozen displayed frame is labelled after 1.5 seconds without presentation, even in clean view; an intentional held frame is labelled separately. The age counter measures the last displayed frame, not end-to-end camera latency.
 
 ## Quality and delay
 
