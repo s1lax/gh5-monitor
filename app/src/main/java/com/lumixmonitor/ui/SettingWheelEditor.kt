@@ -44,7 +44,7 @@ private val WheelQuiet=Color(0xFF9CA9B5)
 @Composable
 internal fun SettingWheelEditor(vm:MonitorViewModel,kind:SettingKind,modifier:Modifier,
     chooseKind:(SettingKind)->Unit,close:()->Unit){
-    val values=remember(kind,vm.isDemo,vm.settings){vm.allowedSettings(kind)}
+    val values=remember(kind,vm.isDemo,vm.settings,vm.isWifi,vm.wifi.options,vm.wifi.values){vm.allowedSettings(kind)}
     val cameraValue=vm.currentSettingValue(kind)
     Column(modifier.background(Color(0xFF14191E),RoundedCornerShape(topStart=12.dp,topEnd=12.dp)).padding(horizontal=12.dp,vertical=8.dp)){
         Row(Modifier.fillMaxWidth(),verticalAlignment=Alignment.CenterVertically){

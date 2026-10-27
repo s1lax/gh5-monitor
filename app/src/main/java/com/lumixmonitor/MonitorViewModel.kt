@@ -166,6 +166,7 @@ class MonitorViewModel(application: Application) : AndroidViewModel(application)
         { cameraFocusAssist=false;cancelAssistSelection() })
 
     val observedSettings: CameraSettings get() {
+        if(isWifi)return wifiSettings()
         val t=remoteControl.telemetry
         if(SystemClock.elapsedRealtime()-t.observedAtMs>4500)return settings.copy(aperture=if(settings.aperture=="f/0")"—" else settings.aperture)
         return settings.copy(
@@ -246,10 +247,52 @@ class MonitorViewModel(application: Application) : AndroidViewModel(application)
         private set
     private val featureIo=Executors.newSingleThreadExecutor { Thread(it,"monitor-tools") }
     val previewDiagnosis=PreviewDiagnosisController(application,io,featureIo,{camera},{!disposed && !isDemo})
+    var isWifi by mutableStateOf(false)
+        private set
+    val lastConnectionWifi:Boolean get()=preferences.getString("connection_type","usb")=="wifi"
+    val wifi:com.lumixmonitor.wifi.WifiCameraController=com.lumixmonitor.wifi.WifiCameraController(application,
+        {bitmap,jpeg->if(isWifi && !disposed){
+            latestCameraJpeg=jpeg;frame=bitmap;settings=wifiSettings();frameCount++
+            logFrameSize(bitmap);levelRoll=null;levelPitch=null;histogram=null
+            previewRecorder?.offer(bitmap,System.nanoTime());analyseFrame()
+        }},
+        {name->if(isWifi && !disposed){cameraModel=name;connectionState=ConnectionState.Connected("Wi-Fi");settings=wifiSettings()}},
+        {text->if(isWifi && !disposed){statusText=text;captureFeedback=text}},
+        {text->if(isWifi && !disposed){performanceText=text;PtpLog.add("WIFI PERF $text")}},
+        {text->if(isWifi && !disposed){lastError=text;statusText=text;connectionState=ConnectionState.Failed(text)}})
+    val cameraTelemetry:com.lumixmonitor.lumix.CameraTelemetry get()=if(isWifi)wifi.telemetry else remoteControl.telemetry
+    val focusAssistActive:Boolean get()=if(isWifi)wifi.assist.active else cameraFocusAssist
+    val assistPending:Boolean get()=if(isWifi)wifi.assistBusy else focusAssistPending
+    val touchFocusEnabled:Boolean get()=if(isWifi)wifi.touchAf else remoteControl.touchAf
+    val focusPoint:Pair<Float,Float>? get()=if(isWifi)wifi.focusTarget else remoteControl.focusTarget
+    fun toggleTouchFocus(){if(isWifi)wifi.toggleTouchAf() else remoteControl.toggleTouchAf()}
+    fun pointFocus(x:Float,y:Float){if(isWifi)wifi.point((x*1000).toInt(),(y*1000).toInt()) else remoteControl.point(x,y)}
+    fun wifiType(kind:SettingKind):String?=when(kind){
+        SettingKind.ISO->"iso";SettingKind.SHUTTER->"shtrspeed";SettingKind.APERTURE->"focal"
+        SettingKind.EXPOSURE->"exposure";SettingKind.WHITE_BALANCE->"whitebalance";SettingKind.PHOTO_STYLE->"photostyle"
+        SettingKind.AF_MODE->"focusmode";SettingKind.AF_ZONE->"afmode";else->null
+    }
+    val shootingModeText:String get()=if(isWifi)wifi.shootingMode else if(settings.mode=="video")"Видео" else settings.mode
+    private fun wifiSettings()=CameraSettings(mode=wifi.shootingMode,iso=wifi.text("iso"),shutter=wifi.text("shtrspeed"),
+        aperture=wifi.text("focal"),exposureComp=wifi.text("exposure"),whiteBalance=wifi.text("whitebalance"),
+        photoStyle=wifi.text("photostyle"),afMode=wifi.text("focusmode"),afZone=wifi.text("afmode"))
+    fun showConnectionSetup(wireless:Boolean){
+        disconnect();preferences.edit().putString("connection_type",if(wireless)"wifi" else "usb").apply();isWifi=wireless
+    }
+    fun connectWifi(address:String){
+        stopDemo();wantConnection=false;generation.incrementAndGet();permissionPending=false
+        isWifi=true;connectionState=ConnectionState.Connecting;statusText="Подключение Wi-Fi…";lastError=null
+        frame=null;heldFrame=null;latestCameraJpeg=null;heldCameraJpeg=null;actualFrameSize=null;lastFrameSize=null
+        frameCount=0;settings=CameraSettings();performanceText="";cameraModel=null
+        preferences.edit().putBoolean("auto_reconnect",false).putString("connection_type","wifi").apply()
+        val token=generation.get()
+        io.execute{releaseQuietly(graceful=true);mainHandler.post{if(!disposed && generation.get()==token && isWifi)wifi.connect(address)}}
+    }
     var neutralPreview by mutableStateOf(false)
     val previewTools:MonitorTools get()=if(neutralPreview)tools.copy(lutEnabled=false,falseColor=false,focusPeaking=false,zebra=false) else tools
     val previewCalibration:DisplayCalibration get()=if(neutralPreview)DisplayCalibration() else displayCalibration
     fun capturePreviewDiagnosis(stage:String){
+        if(isWifi){statusText="Сравнение параметров фото/видео пока доступно по USB";return}
         if(isDemo){statusText="Для сравнения нужна подключённая GH5";return}
         val app=getApplication<Application>()
         val state=org.json.JSONObject().put("version",BuildConfig.VERSION_NAME).put("cameraModel",cameraModel)
@@ -336,11 +379,13 @@ class MonitorViewModel(application: Application) : AndroidViewModel(application)
     // -------------------------------------------------------------- действия
 
     fun connect(device: UsbDevice) {
+        val wasWifi=isWifi
+        wifi.disconnect();isWifi=false;preferences.edit().putString("connection_type","usb").apply()
         stopDemo()
         recovery.observeDevice(device.deviceName)
         if (recovery.requiresUsbChange) { statusText = USB_REPLUG_HINT; return }
-        if (connectionState is ConnectionState.Connecting) return
-        if (connectionState is ConnectionState.Connected && lastDevice?.deviceName == device.deviceName) return
+        if (!wasWifi && connectionState is ConnectionState.Connecting) return
+        if (!wasWifi && connectionState is ConnectionState.Connected && lastDevice?.deviceName == device.deviceName) return
         wantConnection = true
         preferences.edit().putBoolean("auto_reconnect", true).apply()
         val token = generation.incrementAndGet()
@@ -363,6 +408,7 @@ class MonitorViewModel(application: Application) : AndroidViewModel(application)
      * сбрасывает состояние PTP и поднимает сессию и liveview заново.
      */
     fun reconnect() {
+        if(isWifi){connectWifi(wifi.address);return}
         stopDemo()
         recovery.observeDevice(findCurrentDevice()?.deviceName)
         if (recovery.requiresUsbChange) { statusText = USB_REPLUG_HINT; return }
@@ -429,7 +475,7 @@ class MonitorViewModel(application: Application) : AndroidViewModel(application)
 
     /** Serialized with all open/close operations: a failed old session cannot close a new one. */
     private fun checkConnectionHealth() {
-        if (disposed || !wantConnection) return
+        if (disposed || isWifi || !wantConnection) return
         val device = findCurrentDevice()
         recovery.observeDevice(device?.deviceName)
         if (permissionPending) {
@@ -471,12 +517,13 @@ class MonitorViewModel(application: Application) : AndroidViewModel(application)
     }
 
     fun onForeground() {
+        wifi.setForeground(true)
         remoteControl.active=true
         demoFeed?.active=true
         if (!disposed) io.execute { checkConnectionHealth() }
     }
 
-    fun onBackground(){demoFeed?.active=false;remoteControl.active=false}
+    fun onBackground(){demoFeed?.active=false;remoteControl.active=false;wifi.setForeground(false)}
 
     /** Обновляет снимок журнала диагностики для показа в интерфейсе. */
     fun refreshDiagnostics() {
@@ -581,6 +628,7 @@ class MonitorViewModel(application: Application) : AndroidViewModel(application)
     }
 
     fun disconnect() {
+        wifi.disconnect();isWifi=false
         stopDemo()
         heldFrame=null;scopes=null;featureEpoch.incrementAndGet()
         wantConnection = false
@@ -609,6 +657,7 @@ class MonitorViewModel(application: Application) : AndroidViewModel(application)
     }
 
     private fun releaseQuietly(graceful: Boolean = false) {
+        wifi.disconnect(graceful)
         previewDiagnosis.cancel()
         neutralPreview=false
         remoteControl.reset()
@@ -720,12 +769,19 @@ class MonitorViewModel(application: Application) : AndroidViewModel(application)
 
     /** The GH5 shutter follows the physical camera mode: still capture or start movie. */
     fun shutter(){
+        if(isWifi){
+            val t=wifi.telemetry
+            if(android.os.SystemClock.elapsedRealtime()-t.observedAtMs>=4500){captureFeedback="Статус GH5 устарел — дождитесь ответа камеры";return}
+            if(t.recording==true)wifi.command("video_recstop") else if(wifi.shutterMovie)wifi.command("video_recstart") else wifi.command("capture")
+            return
+        }
         val t=remoteControl.telemetry
         if(t.recording==true && android.os.SystemClock.elapsedRealtime()-t.observedAtMs<4500)movie(false)
         else capture()
     }
 
     fun capture() {
+        if(isWifi){wifi.command("capture");return}
         if(capturePending)return
         if(isDemo){captureFeedback="DEMO: спуск камеры, фото/видео зависит от режима GH5";return}
         val token=generation.get()
@@ -748,7 +804,7 @@ class MonitorViewModel(application: Application) : AndroidViewModel(application)
         }
     }
 
-    fun autoFocus() = onIo("Автофокус") { it.autoFocus() }
+    fun autoFocus(){if(isWifi)wifi.command("oneshot_af") else onIo("Автофокус") { it.autoFocus() }}
 
     fun focusNear(speed: Int) = onIo("Фокус ближе") { it.manualFocus("near", speed) }
 
@@ -778,6 +834,7 @@ class MonitorViewModel(application: Application) : AndroidViewModel(application)
      * на 640x480 или 832x624 картинка замирала навсегда.
      */
     fun selectLiveviewMode(setting: LiveviewSetting) {
+        if(isWifi){statusText="Выберите Wi-Fi quality в меню камеры";return}
         io.execute {
             val cam = camera ?: return@execute
             try {
@@ -1150,6 +1207,7 @@ class MonitorViewModel(application: Application) : AndroidViewModel(application)
 
     /** Camera-side magnification; no local digital zoom is applied to live USB frames. */
     fun toggleFocusAssist(){
+        if(isWifi){nativePixels=false;viewTransform=ViewTransform();heldFrame=null;heldCameraJpeg=null;wifi.toggleAssist();return}
         if (focusAssistPending) return
         if (isDemo) {
             cameraFocusAssist = !cameraFocusAssist
@@ -1267,6 +1325,7 @@ class MonitorViewModel(application: Application) : AndroidViewModel(application)
     }
 
     fun allowedSettings(kind:SettingKind):List<Pair<Int,String>>{
+        if(isWifi)return wifiType(kind)?.let{wifi.choices(it).map{v->v.id to v.label}} ?: emptyList()
         val values=if(isDemo)when(kind){
             SettingKind.ISO->intArrayOf(-1,100,125,160,200,250,320,400,500,640,800,1000,1250,1600,2000,2500,3200,4000,5000,6400,8000,10000,12800,16000,20000,25600)
             SettingKind.SHUTTER->intArrayOf(8000000,4000000,2000000,1000000,500000,250000,125000,100000,80000,60000,50000,40000,30000,25000,20000,15000,10000,8000,5000,4000,2000,1000,Int.MIN_VALUE or 2000)
@@ -1279,9 +1338,9 @@ class MonitorViewModel(application: Application) : AndroidViewModel(application)
         return SettingScale.ordered(kind,values).map{it to describeValue(kind,it)}
     }
 
-    fun currentSettingValue(kind:SettingKind):Int? = if(isDemo)demoSettingValues[kind] else propDescs[kind]?.current
+    fun currentSettingValue(kind:SettingKind):Int? = if(isWifi)wifiType(kind)?.let{wifi.current(it)?.id} else if(isDemo)demoSettingValues[kind] else propDescs[kind]?.current
 
-    fun currentSettingText(kind:SettingKind):String=when(kind){
+    fun currentSettingText(kind:SettingKind):String=if(isWifi)wifiType(kind)?.let{wifi.text(it)} ?: "—" else when(kind){
         SettingKind.ISO->settings.iso;SettingKind.SHUTTER->settings.shutter
         SettingKind.APERTURE->settings.aperture;SettingKind.EXPOSURE->settings.exposureComp
         SettingKind.WHITE_BALANCE->settings.whiteBalance
@@ -1289,6 +1348,7 @@ class MonitorViewModel(application: Application) : AndroidViewModel(application)
     }
 
     fun setSettingValue(kind:SettingKind,value:Int){
+        if(isWifi){wifiType(kind)?.let{wifi.select(it,value)};return}
         if(isDemo){
             if(allowedSettings(kind).none{it.first==value})return
             demoSettingValues[kind]=value
@@ -1321,6 +1381,7 @@ class MonitorViewModel(application: Application) : AndroidViewModel(application)
     }
 
     fun movie(start:Boolean){
+        if(isWifi){wifi.command(if(start)"video_recstart" else "video_recstop");return}
         if(isDemo){statusText="DEMO: запись на камере не запускается";return}
         val token=generation.get()
         io.execute{
@@ -1538,6 +1599,7 @@ class MonitorViewModel(application: Application) : AndroidViewModel(application)
 
     override fun onCleared() {
         super.onCleared()
+        wifi.close()
         remoteControl.close()
         stopDemo()
         featureEpoch.incrementAndGet()

@@ -2,6 +2,43 @@
 
 This is the first public GH5-focused release. Earlier version entries summarize the local development iterations; separate public release binaries are not provided for every historical version.
 
+## 0.6.3-gh5 — Faster Wi-Fi mode updates (in development)
+
+- Refresh the current menu on every foreground supervisor poll instead of every fifth poll. Publish the mode before the slower lens-setting reads.
+- Keep fixed-delay polling on the existing serialized control worker: slow requests do not accumulate catch-up polls. This improves status refresh, not camera-side dial behavior or video latency.
+
+## 0.6.2-gh5 — Shooting-mode readout (in development)
+
+- Show the camera-reported shooting mode in portrait and landscape: P/A/S/M, Creative Movie with its separate exposure program, iA/iA+ and custom modes over Wi-Fi. USB displays its existing reported mode.
+- Reuse the current-menu poll; this read-only indicator adds no per-frame camera requests and does not change the mode dial or shutter action.
+- Document Camera/Smartphone priority tradeoffs and higher-resolution research. Four unsupported Wi-Fi size candidates were rejected; no native HD Wi-Fi bypass is established.
+- 124 JVM tests pass, including separate photo/video mode parsing and stale-submode prevention.
+
+## 0.6.1-gh5 — Native Wi-Fi focus, camera status and card files (in development)
+
+- Add native GH5 Wi-Fi MF Assist, camera-returned scale/coordinates, a navigator, ±1× hold controls and native drag/pinch gestures.
+- Add repeated short lens-focus steps with queued-step cancellation on release. GH5 rejects the newer `focus-stop` command, so it is not used.
+- Add touch-coordinate requests with paired release, subject to focus mode and remote-device priority.
+- Show camera battery bars without inventing exact percentages, dual SD status, active slot, remaining capacity, warning and temperature categories.
+- Add card browsing, original-JPEG viewing and original downloads to `Download/GH5 Originals`, with cancellation and playback-to-shooting return. GH5's approximate DIDL file sizes are not used as exact HTTP lengths.
+- Add a visible manual 90° preview-rotation button. UI orientation changes preserve the selected image angle and active connection.
+- Mark stale/frozen frames explicitly; retain existing simultaneous peaking, zebra and framing tools.
+- Preserve brightness processing and camera preview resolution. No 4K Wi-Fi or zero-latency claim.
+- 119 JVM tests pass. See `docs/VALIDATION.md` for hardware checks and remaining limits.
+
+## 0.6.0-gh5 — Wi-Fi connection (in development)
+
+- Add direct-camera / shared-LAN Wi-Fi connection, manual local address and bounded SSDP discovery.
+- Separate HTTP camera control from UDP reception, decoding and presentation, with capacity-one frame hand-offs and stale-frame rejection.
+- Reuse monitor tools, setting wheels, preview JPEG saving and phone proxy recording with Wi-Fi frames.
+- Read advertised setting values and validate camera command results rather than treating HTTP 200 as success.
+- Add basic AF, still capture and video REC / STOP, heartbeat and bounded reconnect attempts.
+- Keep native MF Assist, touch AF, original-file transfer and comparison diagnosis USB-only for now.
+- Preserve an arriving UDP stream across control timeouts, tolerate a busy stream start on reconnect, and prevent a watchdog START immediately after a successful START.
+- Add received FPS, bitrate, packet-gap diagnostics and a Wi-Fi performance profile comparison on Android 10–13.
+- Add matching phone-hotspot interface support, multicast discovery on that interface and a bounded local HTTP socket path. A 5 GHz phone hotspot carried preview successfully but performed worse than direct camera Wi-Fi on the development pair; it is an option, not a claimed latency fix.
+- 111 JVM tests pass, including 29 Wi-Fi protocol / recovery / local HTTP tests. Direct GH5 live view, quality changes, ISO readback, REC / STOP and four orientations were checked. Motion-associated receive stalls remain under investigation; no guaranteed-FPS or zero-latency claim.
+
 ## 0.5.3-gh5 — Photo/video brightness diagnosis
 
 - Add a comparison panel with original USB JPEG, decoded PNG and read-only camera/app settings per photo/video stage.

@@ -9,7 +9,7 @@ This English reference summarizes the operations used by the GH5 fork and supers
 - [Panasonic's LUMIX Remote Control Library page](https://av.jpn.support.panasonic.com/support/global/cs/soft/tool/sdk.html), consulted separately during development; its downloaded SDK and documents are not redistributed.
 - Bounded property/status replies and physical checks on DC-GH5 firmware 2.6. See [validation](VALIDATION.md) for scope and gaps.
 
-The application speaks USB PTP directly with Android USB Host APIs. It does not use Wi-Fi `cam.cgi`, UVC capture, a Panasonic DLL or an HDMI adapter. Do not mix USB property groups with the separate Wi-Fi API.
+This page documents the application's direct USB PTP transport through Android USB Host APIs. Version 0.6.0 also implements a separate Wi-Fi `cam.cgi` / UDP transport; see [Wi-Fi notes](WIFI.md). Neither transport requires UVC capture, a Panasonic DLL or an HDMI adapter. Do not mix USB property groups with Wi-Fi setting tokens.
 
 ## Transactions
 
