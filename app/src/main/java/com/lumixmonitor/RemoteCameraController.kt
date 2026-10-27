@@ -186,7 +186,7 @@ class RemoteCameraController(
             if(!valid(token) || camera()!==cam)return@execute
             try{
                 val ok=endWhiteBalanceMeasurement(cam)
-                post(token,cam){if(ok)whiteBalanceMeasuring=false else message("GH5 не подтвердила выход из замера — повторите закрытие");whiteBalanceBusy=false;requestRefresh()}
+                post(token,cam){if(ok){whiteBalanceMeasuring=false;message("Замер закрыт")}else message("GH5 не подтвердила выход из замера — повторите закрытие");whiteBalanceBusy=false;requestRefresh()}
             }catch(t:Throwable){post(token,cam){whiteBalanceBusy=false;message("Выход из замера: ${t.message}")}}
         }
     }

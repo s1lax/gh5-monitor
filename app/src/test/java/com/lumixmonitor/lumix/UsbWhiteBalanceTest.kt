@@ -6,6 +6,20 @@ import org.junit.Assert.*
 import org.junit.Test
 
 class UsbWhiteBalanceTest {
+    @Test fun familiesKeepCustomAndKelvinSlotsOutOfPresets(){
+        for(mode in 0x800b..0x800e)assertEquals("Замер",UsbWhiteBalance.family(mode))
+        for(mode in 0x8010..0x8013)assertEquals("Кельвины",UsbWhiteBalance.family(mode))
+        for(mode in listOf(null,2,4,0x800f,0x8014,0x8015))assertEquals("Пресеты",UsbWhiteBalance.family(mode))
+    }
+    @Test fun referenceGuideAndSamplesStayCenteredAndBoundedAtEverySourceSize(){
+        for((w,h) in listOf(1 to 1,1280 to 720,1280 to 960,3840 to 2160)){
+            val r=WhiteBalanceRegion.center(w,h)
+            assertTrue(r.left>=0 && r.top>=0 && r.left+r.width<=w && r.top+r.height<=h)
+            assertTrue(kotlin.math.abs(r.left*2+r.width-w)<=1)
+            assertTrue(kotlin.math.abs(r.top*2+r.height-h)<=1)
+            assertTrue(((r.width+r.step-1)/r.step)*((r.height+r.step-1)/r.step)<=65536)
+        }
+    }
     @Test fun sampleUsesUInt32CoordinatesRatherThanFocusUInt16(){
         val p=ByteBuffer.wrap(UsbWhiteBalance.payload(UsbWhiteBalance.SAMPLE)).order(ByteOrder.LITTLE_ENDIAN)
         assertEquals(16,p.remaining());assertEquals(0x03000092,p.int);assertEquals(8,p.int)

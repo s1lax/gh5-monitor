@@ -10,6 +10,7 @@ object UsbWhiteBalance {
     const val END=0x03000093
     fun isKelvin(mode:Int?)=mode!=null && mode in 0x8010..0x8013
     fun isCustom(mode:Int?)=mode!=null && mode in 0x800b..0x800e
+    fun family(mode:Int?)=when{isKelvin(mode)->"Кельвины";isCustom(mode)->"Замер";else->"Пресеты"}
     fun slot(mode:Int)=mode-0x800a
     fun temperature(mode:Int?,reportedMode:Int?,kelvin:Int?):Int?=
         kelvin?.takeIf{isKelvin(mode) && mode==reportedMode && it in 1000..100000}

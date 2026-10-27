@@ -27,6 +27,7 @@ import com.lumixmonitor.lumix.PropDesc
 import com.lumixmonitor.lumix.UsbWhiteBalance
 import com.lumixmonitor.lumix.UsbShootingMode
 import com.lumixmonitor.lumix.WhiteBalanceReference
+import com.lumixmonitor.lumix.WhiteBalanceRegion
 import com.lumixmonitor.lumix.LatestPresentation
 import com.lumixmonitor.monitor.CubeLut
 import com.lumixmonitor.monitor.DemoFeed
@@ -210,7 +211,7 @@ class MonitorViewModel(application: Application) : AndroidViewModel(application)
         private set
     var heldFrame by mutableStateOf<Bitmap?>(null)
         private set
-    val displayFrame: Bitmap? get() = heldFrame ?: frame
+    val displayFrame: Bitmap? get() = if(remoteControl.whiteBalanceMeasuring)frame else heldFrame ?: frame
     var scopes by mutableStateOf<Scopes?>(null)
         private set
     var scopeRaster by mutableStateOf<ScopeRaster?>(null)
@@ -283,13 +284,19 @@ class MonitorViewModel(application: Application) : AndroidViewModel(application)
         return if(k!=null)"${settings.whiteBalance} ${k}K" else settings.whiteBalance
     }
     var whiteBalanceReference by mutableStateOf<WhiteBalanceReference?>(null);private set
+    fun beginWhiteBalanceMeasurement(){whiteBalanceReference=null;lastWbReferenceAt=0L;remoteControl.beginWhiteBalanceMeasurement()}
     private var lastWbReferenceAt=0L
     private fun updateWhiteBalanceReference(bitmap:Bitmap){
         if(!remoteControl.whiteBalanceMeasuring)return
         val now=SystemClock.elapsedRealtime();if(now-lastWbReferenceAt<350)return;lastWbReferenceAt=now
         runCatching{
-            val w=minOf(bitmap.width/5,256).coerceAtLeast(1);val h=minOf(bitmap.height/5,256).coerceAtLeast(1)
-            val pixels=IntArray(w*h);bitmap.getPixels(pixels,0,w,(bitmap.width-w)/2,(bitmap.height-h)/2,w,h)
+            val region=WhiteBalanceRegion.center(bitmap.width,bitmap.height);val step=region.step
+            val count=(region.width+step-1)/step;val rows=(region.height+step-1)/step
+            val pixels=IntArray(count*rows);val row=IntArray(region.width);var at=0
+            for(y in 0 until region.height step step){
+                bitmap.getPixels(row,0,region.width,region.left,region.top+y,region.width,1)
+                for(x in 0 until region.width step step)pixels[at++]=row[x]
+            }
             whiteBalanceReference=WhiteBalanceReference.analyze(pixels)
         }.onFailure{whiteBalanceReference=null}
     }
@@ -309,8 +316,8 @@ class MonitorViewModel(application: Application) : AndroidViewModel(application)
         io.execute{releaseQuietly(graceful=true);mainHandler.post{if(!disposed && generation.get()==token && isWifi)wifi.connect(address)}}
     }
     var neutralPreview by mutableStateOf(false)
-    val previewTools:MonitorTools get()=if(neutralPreview)tools.copy(lutEnabled=false,falseColor=false,focusPeaking=false,zebra=false) else tools
-    val previewCalibration:DisplayCalibration get()=if(neutralPreview)DisplayCalibration() else displayCalibration
+    val previewTools:MonitorTools get()=if(neutralPreview || remoteControl.whiteBalanceMeasuring)tools.copy(lutEnabled=false,falseColor=false,focusPeaking=false,zebra=false) else tools
+    val previewCalibration:DisplayCalibration get()=if(neutralPreview || remoteControl.whiteBalanceMeasuring)DisplayCalibration() else displayCalibration
     fun capturePreviewDiagnosis(stage:String){
         if(isWifi){statusText="Сравнение параметров фото/видео пока доступно по USB";return}
         if(isDemo){statusText="Для сравнения нужна подключённая GH5";return}

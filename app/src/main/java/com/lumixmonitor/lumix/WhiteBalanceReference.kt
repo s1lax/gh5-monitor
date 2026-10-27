@@ -1,5 +1,18 @@
 package com.lumixmonitor.lumix
 
+/** Visual center guide inferred from GH5's White Set screen, not a reported sensor ROI. */
+data class WhiteBalanceRegion(val left:Int,val top:Int,val width:Int,val height:Int){
+    val step:Int get()=maxOf((width+255)/256,(height+255)/256,1)
+    companion object {
+        const val FRACTION=1f/3f
+        fun center(width:Int,height:Int):WhiteBalanceRegion{
+            require(width>0 && height>0)
+            val w=(width*FRACTION).toInt().coerceAtLeast(1);val h=(height*FRACTION).toInt().coerceAtLeast(1)
+            return WhiteBalanceRegion((width-w)/2,(height-h)/2,w,h)
+        }
+    }
+}
+
 /** A preview-based warning, never a camera exposure meter or proof of a neutral reference. */
 data class WhiteBalanceReference(val meanPercent:Int,val clippedPercent:Int){
     val text:String get()=when{

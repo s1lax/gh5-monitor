@@ -2,6 +2,13 @@
 
 This is the first public GH5-focused release. Earlier version entries summarize the local development iterations; separate public release binaries are not provided for every historical version.
 
+## 0.7.1-gh5 — Camera-style USB white balance (in development)
+
+- Split WB selection into presets, K1–K4 temperatures and WB1–WB4 custom references. Use familiar vector WB symbols and yellow selection accents; keep fine adjustment as a separate action labelled with the active mode and any reported shift.
+- Open native measurement in a dedicated White Set view with a central yellow reference guide, live preview, SET and Back. Remove the large settings panel and other guide overlays while measuring.
+- Estimate brightness over the displayed reference guide with bounded sampling. The guide approximates the camera's central area; its exact sensor ROI is not reported over USB.
+- Temporarily bypass phone viewing corrections, held frames and display zoom during measurement while retaining their saved settings. Keep preview rotation independent of UI orientation.
+
 ## 0.7.0-gh5 — USB white-balance editor (in development)
 
 - Add main-screen USB WB tabs for presets, K1–K4 temperatures, a camera-style A/B–G/M grid and native WB1–WB4 measurement.

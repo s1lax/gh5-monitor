@@ -1,6 +1,6 @@
 # User guide
 
-This guide describes 0.5.3-gh5. Documentation is English; current app labels are Russian, shown below where useful.
+This guide describes the USB monitor, including the marked 0.7.1 development features. Documentation is English; current app labels are Russian, shown below where useful.
 
 For experimental Wi-Fi support on the 0.6.0 branch, see [Wi-Fi setup and controls](WIFI.md). USB instructions below continue to apply.
 
@@ -16,14 +16,16 @@ The central circular control on the right in landscape, or at the bottom in port
 
 ISO, shutter, aperture, white balance and EV open scrolling setting selectors. Values come from the camera's supported choices, subject to its current mode. Unknown or unavailable camera information should not be interpreted as a real exposure value.
 
-### USB white balance (0.7.0 development branch)
+### USB white balance (development branch)
 
 Tap **ББ** on the main monitor to open the USB white-balance editor:
 
-- **Режим** (Mode) selects a camera-reported WB preset.
+- **Пресеты** (Presets) contains only camera-reported automatic WB and named lighting presets. K and custom-reference slots are in their own sections. Vector symbols follow the GH5 vocabulary, with yellow outlines indicating the selected camera setting.
 - **Кельвины** (Kelvin) selects K1–K4 and adjusts the selected slot using the camera's reported temperature choices. GH5 specifies 2500–10000 K in 100 K steps. The current K value is also shown in the main WB control when it has been read for that same slot.
-- **Подстройка** (Fine adjustment) shows a two-dimensional camera-style grid: A on the left, B on the right, G above and M below. Tap or drag the point, or press **Центр** (Center) to reset both axes. The displayed direction labels correspond to the camera's signed encoding; positive A/B values move toward blue, while positive G/M values move toward green on the tested GH5. These are camera settings, not a phone viewing filter. Auto WB and named presets do not become fixed-K modes; choose a K slot for numeric temperature.
-- **Замер** (Measure) selects WB1–WB4 and opens the native camera white-set operation. Fill the center of the frame with a neutral white/gray reference under the shooting light, then press **Измерить и записать** (Measure and store). This replaces the selected custom WB measurement. Entering the page or pressing **Войти в замер ББ** (Enter WB measurement) does not itself take the measurement. **Закрыть замер** closes/cancels the measurement mode.
+- **Замер** (Measure) selects WB1–WB4. **White Set · Измерить…** opens the native camera white-set operation in a dedicated live view with a yellow center guide. Fill the guide with a neutral white/gray reference under the shooting light, then press **SET · Измерить и записать** (Measure and store). This replaces the selected custom WB measurement. Entering White Set does not itself take the measurement. **Назад** or Android Back closes the native measurement and returns to WB selection.
+- **Подстройка ›** (Fine adjustment), below the selectors, belongs to the displayed active mode rather than being a fourth WB family. Its separate screen is titled with that mode. The grid has A left, B right, G above and M below. Tap or drag, or press **Центр** (Center) to reset both axes. Positive A/B means blue and positive G/M means green on the tested GH5. These are camera settings, not a phone viewing filter. Automatic and named presets do not become fixed-K modes; choose a K slot for numeric temperature.
+
+The yellow White Set guide covers approximately the central third of the source image along each axis and follows manual preview rotation. It is a visual reference inferred from the native screen, not a camera-reported sensor ROI. Brightness sampling uses this same displayed region, bounded to 65,536 pixels. White Set temporarily shows fresh live frames without phone LUT, viewing correction, digital display zoom, peaking, zebra or framing overlays; saved viewing settings are retained. Standard controls return after exit. Source-side camera processing remains present. Panasonic's [GH5 manual, White Balance section](https://help.na.panasonic.com/wp-content/uploads/2023/02/DCGH5_DVQP1117ZA_ENG.pdf) describes the native reference / color-temperature / fine-adjustment workflow.
 
 The app validates the selected WB mode again before queued fine adjustments and before sampling. Sampling requires recording-off telemetry. Changing WB on the body clears the app's old measurement state; each sampling attempt re-enters the native operation and returns to the entry screen afterward. An already-closed native operation is treated as closed, rather than leaving the app stuck after an `InvalidParameter` END response. Closing the editor, leaving the measurement tab, backgrounding the app or gracefully disconnecting attempts to end measurement.
 

@@ -1,5 +1,15 @@
 # Validation record
 
+## 0.7.1-gh5 White Set layout
+
+**135 JVM tests pass** with no failures, errors or skipped tests. New tests check WB-family separation and centered, bounded reference sampling at tiny, HD and 4K image dimensions.
+
+On GH5 / OnePlus 8 Pro / Android 13, the new UI was checked for preset-only entries, four K slots, four WB slots, a mode-labelled fine-adjustment screen and native measurement entry without sampling. Portrait and landscape screenshots confirmed the yellow guide and reachable SET / Back controls. Fresh USB JPEGs continued during measurement, Android Back returned to WB selection and the same USB camera instance survived the orientation change. The pre-test WB1 selection and orientation request were restored. This check did not overwrite a custom measurement.
+
+After final text-width refinements, the installed build was checked again for readable AWB/AWBc/AWBw, WB1-labelled fine adjustment, White Set entry and on-screen Back with a closed-state confirmation. Grid tap/drag readback and Center passed in the scrollable editor; original axis values were restored. Final smoke: fresh 1280×720 USB JPEGs at approximately 30 FPS, Video M, WB1, recording off, measurement closed, the user's 90° preview angle and no fatal entries for that process. The distributed debug APK's SHA-256 matches the installed APK.
+
+The visual center guide approximates the native White Set screen. GH5 does not provide its exact sensor ROI through the implemented USB commands. Brightness describes decoded JPEG samples from the displayed guide; it is not a calibrated sensor measurement. Successful neutral-reference calibration and long-run reliability remain unverified.
+
 ## 0.7.0-gh5 USB white balance
 
 **133 JVM tests pass**, with no failures, errors or skipped tests. Added cases cover native white-set packet lengths and UINT32 coordinates, rejection of unrelated control IDs and vendor events, an already-closed END reply, matched-slot Kelvin display, movie exposure labels, grid coordinate round trips and preview brightness warnings.

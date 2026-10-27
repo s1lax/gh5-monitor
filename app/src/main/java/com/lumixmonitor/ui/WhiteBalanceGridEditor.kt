@@ -56,7 +56,7 @@ import kotlin.math.max
             }
         }
         Column(Modifier.weight(1f),verticalArrangement=Arrangement.spacedBy(6.dp)){
-            Text(WhiteBalanceGrid.text(draft.first,draft.second),color=Color(0xFFB4E4CC),fontSize=14.sp)
+            Text(WhiteBalanceGrid.text(draft.first,draft.second),color=WbAccent,fontSize=14.sp)
             Text("Касание или перетаскивание точки",color=Color(0xFF9CA9B5),fontSize=11.sp)
             OutlinedButton(onClick={draft=0 to 0;latestChoose(0,0)},enabled=enabled,modifier=Modifier.heightIn(min=44.dp)){Text("Центр",fontSize=12.sp)}
         }

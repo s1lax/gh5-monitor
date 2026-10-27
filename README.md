@@ -16,7 +16,7 @@ Created and tested by **[s1lax](https://github.com/s1lax)**, developed with **GP
 
 The `feature/wifi-monitor` branch adds **0.6.3-gh5** Wi-Fi support using local camera HTTP commands and UDP JPEG preview, including native MF Assist, shooting-mode readout and card browsing. The published 0.5.3 release remains USB-only. See the [Wi-Fi guide](docs/WIFI.md) for setup, verified behavior and latency limits.
 
-The `feature/usb-white-balance` branch builds **0.7.0-gh5** on that development branch and resumes USB work: K1–K4 temperature control, a two-dimensional A/B–G/M adjustment grid, native custom-WB measurement and the USB Creative Video exposure-mode readout. See the [USB white-balance guide](docs/USAGE.md#usb-white-balance-070-development-branch). Wi-Fi development is unchanged in this update.
+The `feature/usb-white-balance` branch builds **0.7.1-gh5** on that development branch and resumes USB work: camera-style preset / K1–K4 / WB1–WB4 selection, a separate A/B–G/M fine-adjustment grid, a dedicated native White Set measurement screen and the USB Creative Video exposure-mode readout. See the [USB white-balance guide](docs/USAGE.md#usb-white-balance-development-branch). Wi-Fi development is unchanged in this update.
 
 ## What it can do
 

@@ -11,6 +11,7 @@ import androidx.compose.foundation.lazy.LazyRow
 import androidx.compose.foundation.lazy.itemsIndexed
 import androidx.compose.foundation.lazy.rememberLazyListState
 import androidx.compose.foundation.rememberScrollState
+import androidx.compose.foundation.verticalScroll
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material3.Text
 import androidx.compose.runtime.*
@@ -46,13 +47,14 @@ internal fun SettingWheelEditor(vm:MonitorViewModel,kind:SettingKind,modifier:Mo
     chooseKind:(SettingKind)->Unit,close:()->Unit){
     val values=remember(kind,vm.isDemo,vm.settings,vm.isWifi,vm.wifi.options,vm.wifi.values){vm.allowedSettings(kind)}
     val cameraValue=vm.currentSettingValue(kind)
-    Column(modifier.background(Color(0xFF14191E),RoundedCornerShape(topStart=12.dp,topEnd=12.dp)).padding(horizontal=12.dp,vertical=8.dp)){
+    val usbWb=kind==SettingKind.WHITE_BALANCE && !vm.isWifi && !vm.isDemo
+    Column(modifier.background(Color(0xFF14191E),RoundedCornerShape(topStart=12.dp,topEnd=12.dp)).verticalScroll(rememberScrollState()).padding(horizontal=12.dp,vertical=8.dp)){
         Row(Modifier.fillMaxWidth(),verticalAlignment=Alignment.CenterVertically){
-            Text(kind.label,color=Color.White,fontSize=14.sp,fontWeight=FontWeight.Medium,modifier=Modifier.weight(1f))
+            Text(if(usbWb)"Баланс белого" else kind.label,color=Color.White,fontSize=14.sp,fontWeight=FontWeight.Medium,modifier=Modifier.weight(1f))
             Text(if(vm.isDemo)"DEMO: ${vm.currentSettingText(kind)}" else "GH5: ${vm.currentSettingText(kind)}",color=WheelQuiet,fontSize=11.sp)
             Text("×",color=Color.White,fontSize=24.sp,modifier=Modifier.size(40.dp).semantics{contentDescription="Закрыть шкалу"}.clickable(role=Role.Button,onClick=close).wrapContentSize())
         }
-        Row(Modifier.fillMaxWidth().horizontalScroll(rememberScrollState()),horizontalArrangement=Arrangement.spacedBy(6.dp)){
+        if(!usbWb)Row(Modifier.fillMaxWidth().horizontalScroll(rememberScrollState()),horizontalArrangement=Arrangement.spacedBy(6.dp)){
             listOf(SettingKind.ISO to "ISO",SettingKind.SHUTTER to "Затвор",SettingKind.APERTURE to "f",SettingKind.EXPOSURE to "EV",SettingKind.WHITE_BALANCE to "ББ").forEach{(value,label)->
                 Text(label,color=if(kind==value)Color.Black else WheelQuiet,fontSize=12.sp,
                     modifier=Modifier.background(if(kind==value)WheelAccent else Color(0xFF252E36),RoundedCornerShape(5.dp))
@@ -65,7 +67,7 @@ internal fun SettingWheelEditor(vm:MonitorViewModel,kind:SettingKind,modifier:Mo
         else key(kind,values.map{it.first}){
             DiscreteSettingWheel(kind.label,values,cameraValue,kind in listOf(SettingKind.WHITE_BALANCE,SettingKind.PHOTO_STYLE,SettingKind.QUALITY)){vm.setSettingValue(kind,it)}
         }
-        Text(if(kind==SettingKind.WHITE_BALANCE && !vm.isWifi && !vm.isDemo)"ББ настраивается в GH5 · яркость эталона оценивается по USB-кадру" else if(vm.isDemo || !vm.statusText.startsWith("${kind.label}:"))"Листайте шкалу · касание значения или − / + для точного шага" else vm.statusText,
+        if(!usbWb)Text(if(vm.isDemo || !vm.statusText.startsWith("${kind.label}:"))"Листайте шкалу · касание значения или − / + для точного шага" else vm.statusText,
             color=WheelQuiet,fontSize=10.sp,maxLines=2,modifier=Modifier.padding(top=3.dp))
     }
 }
