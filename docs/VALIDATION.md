@@ -1,5 +1,11 @@
 # Validation record
 
+## 0.6.3-gh5 mode refresh cadence
+
+**124 JVM tests pass**, with no failures, errors or skipped tests, and the debug APK build succeeded. ADB reported successful installation on the development phone. Foreground current-menu polling now runs every supervisor cycle before lens reads, replacing the previous every-fifth-cycle refresh. Polling remains serialized and uses fixed delay, so slow camera requests do not create catch-up polls.
+
+The user confirmed that only the mode label lagged after a physical dial change; the image changed normally with Camera remote-device priority. ADB disconnected during the post-installation measurement, so the new physical-dial-to-label delay and steady-stream performance have not yet been confirmed on hardware. The one-second supervisor delay is not a guaranteed one-second end-to-end update time. No camera mode writes were added.
+
 ## 0.6.2-gh5 shooting-mode readout and resolution research
 
 **124 JVM tests pass**, with no failures, errors or skipped tests. New cases distinguish photo M from Creative Movie M, parse its separate exposure-program field, clear stale submodes on mode changes, ignore inactive mode entries and handle custom/automatic/unknown modes.

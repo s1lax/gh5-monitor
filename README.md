@@ -14,14 +14,14 @@ Created and tested by **[s1lax](https://github.com/s1lax)**, developed with **GP
 
 > **Experimental, first public preview: 0.5.3-gh5.** The app has been tested with one GH5 and one phone, not a broad compatibility matrix. The current in-app labels are Russian; this repository's documentation is in English. Contributions for English UI localization are welcome.
 
-The `feature/wifi-monitor` branch adds **0.6.2-gh5** Wi-Fi support using local camera HTTP commands and UDP JPEG preview, including native MF Assist, shooting-mode readout and card browsing. The published 0.5.3 release remains USB-only. See the [Wi-Fi guide](docs/WIFI.md) for setup, verified behavior and latency limits.
+The `feature/wifi-monitor` branch adds **0.6.3-gh5** Wi-Fi support using local camera HTTP commands and UDP JPEG preview, including native MF Assist, shooting-mode readout and card browsing. The published 0.5.3 release remains USB-only. See the [Wi-Fi guide](docs/WIFI.md) for setup, verified behavior and latency limits.
 
 ## What it can do
 
 | Area | Features |
 | --- | --- |
 | USB live view | Camera-advertised quality selection, JPEG preview, recovery after temporary interruptions, performance diagnostics |
-| Wi-Fi preview (0.6.2 branch) | Direct hotspot or shared LAN, local-IP entry / SSDP discovery, newest-frame UDP decoding, explicit frozen-frame warning, camera controls and advertised setting choices |
+| Wi-Fi preview (0.6.3 branch) | Direct hotspot or shared LAN, local-IP entry / SSDP discovery, newest-frame UDP decoding, explicit frozen-frame warning, camera controls and advertised setting choices |
 | Field monitor UI | Portrait and landscape layouts, centered shutter, clean view, simultaneous tools, visible manual preview-rotation button independent of UI orientation |
 | Focus | **Camera-native MF Assist**, remembered phone-selected area, navigator, hold-to-repeat movement and ±1× magnification; separate 1:1 display inspection and app focus peaking |
 | Exposure tools | Zebra, false color, histogram / RGB histogram, waveform and vectorscope, calculated from the received preview |

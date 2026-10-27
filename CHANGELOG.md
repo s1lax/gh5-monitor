@@ -2,6 +2,11 @@
 
 This is the first public GH5-focused release. Earlier version entries summarize the local development iterations; separate public release binaries are not provided for every historical version.
 
+## 0.6.3-gh5 — Faster Wi-Fi mode updates (in development)
+
+- Refresh the current menu on every foreground supervisor poll instead of every fifth poll. Publish the mode before the slower lens-setting reads.
+- Keep fixed-delay polling on the existing serialized control worker: slow requests do not accumulate catch-up polls. This improves status refresh, not camera-side dial behavior or video latency.
+
 ## 0.6.2-gh5 — Shooting-mode readout (in development)
 
 - Show the camera-reported shooting mode in portrait and landscape: P/A/S/M, Creative Movie with its separate exposure program, iA/iA+ and custom modes over Wi-Fi. USB displays its existing reported mode.

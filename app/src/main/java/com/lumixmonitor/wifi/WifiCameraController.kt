@@ -343,10 +343,16 @@ class WifiCameraController(private val app:Application,
             }
             s.state=state.values;s.failures=0;s.poll++
             if(galleryRequested){publish(s);return}
+            // A body-dial change is reported by curmenu, not getstate. Refresh it
+            // every foreground poll, before slower lens reads can delay the badge.
+            // Fixed-delay supervision keeps at most one poll running, without catch-up work.
+            if(foreground || s.poll%5==0){
+                val r=s.link.request("getinfo",mapOf("type" to "curmenu"),1200)
+                s.catalog.applyCurrent(r);publish(s)
+            }
             if(s.poll%3==0 && foreground && state.values["cammode"]=="rec"){
                 for(type in listOf("focal","shtrspeed","focusmode")){val r=s.link.request("getsetting",mapOf("type" to type),900);if(r.ok)s.catalog.applyValues(r.values)}
             }
-            if(s.poll%5==0){val r=s.link.request("getinfo",mapOf("type" to "curmenu"),1200);s.catalog.applyCurrent(r)}
             publish(s)
             val now=SystemClock.elapsedRealtime()
             val stale=now-s.stream.lastFrameAt>3500

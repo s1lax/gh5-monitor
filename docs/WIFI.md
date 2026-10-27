@@ -1,4 +1,4 @@
-# Wi-Fi monitor (0.6.2 branch)
+# Wi-Fi monitor (0.6.3 branch)
 
 Wi-Fi support is experimental. Direct connection, the reported quality modes, ISO write/readback and video REC / STOP have been checked on the development GH5 and OnePlus 8 Pro / Android 13. The published 0.5.3 APK is USB-only. No router, Internet connection, root or HDMI capture device is required for direct camera Wi-Fi.
 
@@ -28,7 +28,7 @@ The existing display tools work on received Wi-Fi frames: app peaking, zebra, gu
 
 Basic remote operations include autofocus, still capture and video REC / STOP. In the camera menu choose whether the central shutter starts a photo or movie; recent recording telemetry changes it to Stop. This selection changes the button action, not the physical mode dial. ISO, shutter, aperture, exposure compensation, white balance and other options appear only when reported by the camera and can be disabled in its current mode. Settings are sent using Wi-Fi tokens, not USB property codes.
 
-The main status area also displays the reported shooting mode. Photo **M** and Creative Movie **Видео M** (Video M) are distinct: GH5 reports the movie mode and its P/A/S/M exposure program as separate current-menu fields. P/A/S, iA/iA+ and custom modes are decoded when supplied. USB uses its existing mode readout and currently labels its movie mode without a P/A/S/M subtype. This is a read-only display, independent of the central shutter's chosen action. It reuses the periodic menu refresh, so changes can take several seconds to appear.
+The main status area also displays the reported shooting mode. Photo **M** and Creative Movie **Видео M** (Video M) are distinct: GH5 reports the movie mode and its P/A/S/M exposure program as separate current-menu fields. P/A/S, iA/iA+ and custom modes are decoded when supplied. USB uses its existing mode readout and currently labels its movie mode without a P/A/S/M subtype. This is a read-only display, independent of the central shutter's chosen action. Since 0.6.3, the current menu is read on every foreground supervisor cycle and the mode is published before lens-setting reads, rather than waiting for every fifth cycle. A cycle waits one second after the preceding poll finishes; slow camera replies or queued user commands can extend it. This is not an instantaneous dial event subscription and does not change camera-side mode transitions or video latency.
 
 Native camera MF Assist, navigation, touch-coordinate requests, short manual-focus steps and camera-card browsing are now available over Wi-Fi. The photo/video comparison ZIP tool remains USB-only. Feature availability still depends on camera mode, lens and permissions.
 
