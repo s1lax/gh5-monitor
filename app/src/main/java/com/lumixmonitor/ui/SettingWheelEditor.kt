@@ -60,11 +60,12 @@ internal fun SettingWheelEditor(vm:MonitorViewModel,kind:SettingKind,modifier:Mo
                         .clickable(role=Role.Tab){chooseKind(value)}.padding(horizontal=14.dp,vertical=7.dp))
             }
         }
-        if(values.isEmpty())Text("Камера ещё не сообщила доступные значения",color=WheelQuiet,fontSize=12.sp,modifier=Modifier.padding(vertical=24.dp))
+        if(kind==SettingKind.WHITE_BALANCE && !vm.isWifi && !vm.isDemo)UsbWhiteBalanceEditor(vm,values,cameraValue)
+        else if(values.isEmpty())Text("Камера ещё не сообщила доступные значения",color=WheelQuiet,fontSize=12.sp,modifier=Modifier.padding(vertical=24.dp))
         else key(kind,values.map{it.first}){
             DiscreteSettingWheel(kind.label,values,cameraValue,kind in listOf(SettingKind.WHITE_BALANCE,SettingKind.PHOTO_STYLE,SettingKind.QUALITY)){vm.setSettingValue(kind,it)}
         }
-        Text(if(vm.isDemo || !vm.statusText.startsWith("${kind.label}:"))"Листайте шкалу · касание значения или − / + для точного шага" else vm.statusText,
+        Text(if(kind==SettingKind.WHITE_BALANCE && !vm.isWifi && !vm.isDemo)"ББ настраивается в GH5 · яркость эталона оценивается по USB-кадру" else if(vm.isDemo || !vm.statusText.startsWith("${kind.label}:"))"Листайте шкалу · касание значения или − / + для точного шага" else vm.statusText,
             color=WheelQuiet,fontSize=10.sp,maxLines=2,modifier=Modifier.padding(top=3.dp))
     }
 }

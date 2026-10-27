@@ -1,5 +1,22 @@
 # Validation record
 
+## 0.7.0-gh5 USB white balance
+
+**133 JVM tests pass**, with no failures, errors or skipped tests. Added cases cover native white-set packet lengths and UINT32 coordinates, rejection of unrelated control IDs and vendor events, an already-closed END reply, matched-slot Kelvin display, movie exposure labels, grid coordinate round trips and preview brightness warnings.
+
+Checked with the development GH5 and OnePlus 8 Pro / Android 13 over USB PC(Tether), using phone Wi-Fi debugging:
+
+- The main monitor reports Creative Video **Видео M** from the dial-position property and separate movie exposure program.
+- K1–K4 read as independent slots. Main-editor temperature writes/readback were checked at K1 5300 → 5400 K and K2 4000 → 4100 K, then restored. K3 3200 K and K4 5600 K were read. These were the values at that test, not factory defaults.
+- A/B +1 and G/M −1 writes were acknowledged and read back, then restored. Additional bounded ±3 checks confirmed that positive A/B adds blue and positive G/M adds green. The grid labels use that hardware-checked polarity.
+- Grid taps and drags produced the requested B3/G3 and A3/G3 values; Center reset both axes. Portrait/landscape controls remained reachable and the USB camera instance survived the orientation change. Current per-mode shifts were restored after the test.
+- Native measurement START/END were acknowledged without changing the selected custom WB properties. After changing WB during an open measurement, the new implementation returned to entry and allowed repeated entry/exit. The test uses a camera WB write, not a physical dial gesture; the user separately reported the original problem after body WB changes.
+- The first implementation accepted sampling but later received camera event `0xC212`, matching the user's report that GH5 rejected the dark reference. After manual WB changes, stale SAMPLE/END calls returned `InvalidParameter`. The final implementation handles the failure event and already-closed END separately, re-enters before sampling and clears stale state on a fresh WB-mode change.
+- Two subsequent samples each received command acceptance followed by `0xC212` with white-set failure ID `0x12800042`. Both returned to the entry screen with a failure message and allowed another attempt. Unrelated vendor-event parameters are ignored. This checks failure recovery, not successful neutral-reference calibration.
+- The final installed 0.7.0 build passed a repeated grid tap/drag/readback and landscape-fit check with the same USB camera instance. A closing smoke check found fresh 1280×720 JPEGs at approximately 30 FPS, Video M, WB4 selected, measurement closed, recording off and no fatal entries for that process. The user's 90° preview angle and manual exposure changes were retained. These are short session checks, not long-run reliability or end-to-end latency measurements.
+
+The user also changed camera exposure/WB while testing. Those manual exposure changes were preserved. WB1 was designated as the disposable measurement-test cell with the user's authorization; the selected mode was returned to WB4. A valid neutral-reference measurement and colorimetric accuracy are not established by a command acknowledgement. The exact reason field for the camera failure is not decoded. Central brightness is a bounded, rate-limited analysis of decoded USB JPEG pixels before phone viewing correction; it is not a calibrated sensor meter. Wi-Fi behavior and the rendering/peaking/zebra pipeline were not changed.
+
 ## 0.6.3-gh5 mode refresh cadence
 
 **124 JVM tests pass**, with no failures, errors or skipped tests, and the debug APK build succeeded. ADB reported successful installation on the development phone. Foreground current-menu polling now runs every supervisor cycle before lens reads, replacing the previous every-fifth-cycle refresh. Polling remains serialized and uses fixed delay, so slow camera requests do not create catch-up polls.

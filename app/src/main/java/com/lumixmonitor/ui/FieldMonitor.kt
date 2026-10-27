@@ -152,7 +152,7 @@ private fun FieldMonitorBody(vm:MonitorViewModel){
                     Setting(SettingKind.ISO,"ISO",vm.observedSettings.iso,true,controlsWidth/5)
                     Setting(SettingKind.SHUTTER,"Затвор",vm.observedSettings.shutter,true,controlsWidth/5)
                     Setting(SettingKind.APERTURE,"Диафр.",vm.observedSettings.aperture,true,controlsWidth/5)
-                    Setting(SettingKind.WHITE_BALANCE,"ББ",compactWb(vm.settings.whiteBalance),true,controlsWidth/5)
+                    Setting(SettingKind.WHITE_BALANCE,"ББ",compactWb(vm.whiteBalanceText),true,controlsWidth/5)
                     Setting(SettingKind.EXPOSURE,"EV",vm.settings.exposureComp,true,controlsWidth/5)
                 }
                 Row(Modifier.fillMaxWidth().height(88.dp).padding(horizontal=12.dp),verticalAlignment=Alignment.CenterVertically){
@@ -187,7 +187,7 @@ private fun FieldMonitorBody(vm:MonitorViewModel){
                     }
                     ShutterButton(vm,Modifier.fillMaxWidth())
                     Column(Modifier.weight(1f).fillMaxWidth(),verticalArrangement=Arrangement.SpaceEvenly){
-                        Setting(SettingKind.WHITE_BALANCE,"ББ",compactWb(vm.settings.whiteBalance),height=cellHeight)
+                        Setting(SettingKind.WHITE_BALANCE,"ББ",compactWb(vm.whiteBalanceText),height=cellHeight)
                         Setting(SettingKind.EXPOSURE,"EV",vm.settings.exposureComp,height=cellHeight)
                         Rail("Лупа GH5",assistLabel,vm.focusAssistActive,enabled=!vm.assistPending,cellHeight=cellHeight){vm.toggleFocusAssist()}
                     }

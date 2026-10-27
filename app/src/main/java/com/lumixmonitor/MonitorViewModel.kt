@@ -24,6 +24,9 @@ import com.lumixmonitor.lumix.LumixCodec
 import com.lumixmonitor.lumix.LumixProp
 import com.lumixmonitor.lumix.LumixTables
 import com.lumixmonitor.lumix.PropDesc
+import com.lumixmonitor.lumix.UsbWhiteBalance
+import com.lumixmonitor.lumix.UsbShootingMode
+import com.lumixmonitor.lumix.WhiteBalanceReference
 import com.lumixmonitor.lumix.LatestPresentation
 import com.lumixmonitor.monitor.CubeLut
 import com.lumixmonitor.monitor.DemoFeed
@@ -272,7 +275,24 @@ class MonitorViewModel(application: Application) : AndroidViewModel(application)
         SettingKind.EXPOSURE->"exposure";SettingKind.WHITE_BALANCE->"whitebalance";SettingKind.PHOTO_STYLE->"photostyle"
         SettingKind.AF_MODE->"focusmode";SettingKind.AF_ZONE->"afmode";else->null
     }
-    val shootingModeText:String get()=if(isWifi)wifi.shootingMode else if(settings.mode=="video")"Видео" else settings.mode
+    val shootingModeText:String get()=if(isWifi)wifi.shootingMode else UsbShootingMode.label(settings.mode,remoteControl.properties[0x06000011]?.current)
+    val whiteBalanceText:String get(){
+        if(isWifi || isDemo)return settings.whiteBalance
+        val p=remoteControl.properties
+        val k=UsbWhiteBalance.temperature(currentSettingValue(SettingKind.WHITE_BALANCE),p[LumixProp.WHITE_BALANCE_PARAM]?.current,p[LumixProp.WHITE_BALANCE_K_SET]?.current)
+        return if(k!=null)"${settings.whiteBalance} ${k}K" else settings.whiteBalance
+    }
+    var whiteBalanceReference by mutableStateOf<WhiteBalanceReference?>(null);private set
+    private var lastWbReferenceAt=0L
+    private fun updateWhiteBalanceReference(bitmap:Bitmap){
+        if(!remoteControl.whiteBalanceMeasuring)return
+        val now=SystemClock.elapsedRealtime();if(now-lastWbReferenceAt<350)return;lastWbReferenceAt=now
+        runCatching{
+            val w=minOf(bitmap.width/5,256).coerceAtLeast(1);val h=minOf(bitmap.height/5,256).coerceAtLeast(1)
+            val pixels=IntArray(w*h);bitmap.getPixels(pixels,0,w,(bitmap.width-w)/2,(bitmap.height-h)/2,w,h)
+            whiteBalanceReference=WhiteBalanceReference.analyze(pixels)
+        }.onFailure{whiteBalanceReference=null}
+    }
     private fun wifiSettings()=CameraSettings(mode=wifi.shootingMode,iso=wifi.text("iso"),shutter=wifi.text("shtrspeed"),
         aperture=wifi.text("focal"),exposureComp=wifi.text("exposure"),whiteBalance=wifi.text("whitebalance"),
         photoStyle=wifi.text("photostyle"),afMode=wifi.text("focusmode"),afZone=wifi.text("afmode"))
@@ -523,7 +543,7 @@ class MonitorViewModel(application: Application) : AndroidViewModel(application)
         if (!disposed) io.execute { checkConnectionHealth() }
     }
 
-    fun onBackground(){demoFeed?.active=false;remoteControl.active=false;wifi.setForeground(false)}
+    fun onBackground(){demoFeed?.active=false;remoteControl.active=false;remoteControl.cancelWhiteBalanceMeasurement();wifi.setForeground(false)}
 
     /** Обновляет снимок журнала диагностики для показа в интерфейсе. */
     fun refreshDiagnostics() {
@@ -562,6 +582,7 @@ class MonitorViewModel(application: Application) : AndroidViewModel(application)
 
             val newCamera = LumixCamera(newTransport)
             newCamera.onObjectAdded = { if(isCurrent(token))remoteControl.newObject() }
+            newCamera.onWhiteBalanceFailed = { if(isCurrent(token))remoteControl.whiteBalanceFailure() }
             newCamera.onDevicePropChanged = propChanged@ { propCode ->
                 if (!isCurrent(token)) return@propChanged
                 Log.d(TAG, "камера изменила свойство 0x%08X".format(propCode))
@@ -660,6 +681,7 @@ class MonitorViewModel(application: Application) : AndroidViewModel(application)
         wifi.disconnect(graceful)
         previewDiagnosis.cancel()
         neutralPreview=false
+        if(graceful && transport?.isSynchronized==true)camera?.let{cam->runCatching{remoteControl.endWhiteBalanceMeasurement(cam)}}
         remoteControl.reset()
         stopProxy()
         val previousLoop = liveview
@@ -721,6 +743,7 @@ class MonitorViewModel(application: Application) : AndroidViewModel(application)
                 ?.also { propDescs[SettingKind.EXPOSURE] = it }
             val wbDesc = read(LumixProp.WHITE_BALANCE, 2)
                 ?.also { propDescs[SettingKind.WHITE_BALANCE] = it }
+            if(properties==null || LumixProp.WHITE_BALANCE in properties)wbDesc?.let{remoteControl.observeWhiteBalanceMode(it.current)}
             val styleDesc = read(LumixProp.PHOTO_STYLE, 2)
                 ?.also { propDescs[SettingKind.PHOTO_STYLE] = it }
             val aspectDesc = read(LumixProp.IMAGE_MODE_ASPECT, 2)
@@ -1063,6 +1086,7 @@ class MonitorViewModel(application: Application) : AndroidViewModel(application)
                     recovery.frameReceived(SystemClock.elapsedRealtime())
                     latestCameraJpeg = liveviewFrame.jpeg
                     frame = bitmap
+                    updateWhiteBalanceReference(bitmap)
                     previewDiagnosis.offer(bitmap,liveviewFrame.jpeg)
                     if(frameProbeRequested.compareAndSet(true,false)){
                         heldFrame=bitmap;heldCameraJpeg=liveviewFrame.jpeg
@@ -1343,7 +1367,7 @@ class MonitorViewModel(application: Application) : AndroidViewModel(application)
     fun currentSettingText(kind:SettingKind):String=if(isWifi)wifiType(kind)?.let{wifi.text(it)} ?: "—" else when(kind){
         SettingKind.ISO->settings.iso;SettingKind.SHUTTER->settings.shutter
         SettingKind.APERTURE->settings.aperture;SettingKind.EXPOSURE->settings.exposureComp
-        SettingKind.WHITE_BALANCE->settings.whiteBalance
+        SettingKind.WHITE_BALANCE->whiteBalanceText
         else->currentSettingValue(kind)?.let{describeValue(kind,it)} ?: "—"
     }
 
@@ -1368,7 +1392,7 @@ class MonitorViewModel(application: Application) : AndroidViewModel(application)
                 val ok=cam.setDevicePropValue(kind.paramCode,kind.valueSize,value)
                 if(isCurrent(token) && sequence.get()==request){
                     statusText=if(ok)"${kind.label}: подтверждено камерой" else "${kind.label}: камера отказала"
-                    if(ok)refreshSettings(setOf(kind.propCode))
+                    if(ok){refreshSettings(setOf(kind.propCode));if(kind==SettingKind.WHITE_BALANCE)remoteControl.requestRefresh()}
                 }
             }catch(t:Throwable){if(isCurrent(token) && sequence.get()==request)statusText="${kind.label}: ${t.message}"}
         }

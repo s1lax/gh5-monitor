@@ -2,6 +2,15 @@
 
 This is the first public GH5-focused release. Earlier version entries summarize the local development iterations; separate public release binaries are not provided for every historical version.
 
+## 0.7.0-gh5 — USB white-balance editor (in development)
+
+- Add main-screen USB WB tabs for presets, K1–K4 temperatures, a camera-style A/B–G/M grid and native WB1–WB4 measurement.
+- Read camera-reported temperature choices and show Kelvin only when it belongs to the selected K slot. Coalesce grid writes, validate WB mode around axis writes and read back both axes.
+- Add native measurement entry, explicit sampling and exit; reset stale state after camera WB changes, re-enter before sampling and handle already-closed END responses.
+- Surface GH5's asynchronous white-set failure event and a clearly labelled central-JPEG brightness estimate, without claiming an exact camera failure reason or changing exposure automatically.
+- Show the Creative Video P/A/S/M exposure subtype on the USB status readout. Existing dial events remain the refresh source.
+- Keep Wi-Fi, image processing, peaking and zebra unchanged.
+
 ## 0.6.3-gh5 — Faster Wi-Fi mode updates (in development)
 
 - Refresh the current menu on every foreground supervisor poll instead of every fifth poll. Publish the mode before the slower lens-setting reads.
