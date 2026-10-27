@@ -30,9 +30,10 @@ internal fun UsbWhiteBalanceEditor(vm:MonitorViewModel,modes:List<Pair<Int,Strin
     val r=vm.remoteControl
     var page by remember{mutableStateOf(UsbWhiteBalance.family(mode))}
     var fine by remember{mutableStateOf(false)}
-    val ready=r.properties[LumixProp.WHITE_BALANCE_PARAM]?.current==mode && mode!=null
+    val ready=vm.pendingWhiteBalance==null && r.properties[LumixProp.WHITE_BALANCE_PARAM]?.current==mode && mode!=null
     LaunchedEffect(mode){r.requestRefresh();page=UsbWhiteBalance.family(mode)}
     val name=wbModeName(mode,vm.settings.whiteBalance)
+    if(r.whiteBalanceWarning.isNotBlank())Text(r.whiteBalanceWarning,color=WbAccent,fontSize=11.sp,modifier=Modifier.padding(vertical=5.dp))
     if(fine){
         Row(Modifier.fillMaxWidth(),verticalAlignment=Alignment.CenterVertically){
             WbAction("‹ Назад",Modifier.width(92.dp)){fine=false}
@@ -109,7 +110,7 @@ internal fun wbModeName(mode:Int?,fallback:String="—"):String=when(mode){
     Row(modifier.heightIn(min=48.dp).border(1.dp,if(active)WbAccent else Color(0xFF47515A),RoundedCornerShape(4.dp))
         .background(if(active)Color(0xFF3C3622) else Color(0xFF20272D),RoundedCornerShape(4.dp))
         .semantics{contentDescription="ББ: $text";selected=active}.clickable(role=Role.Button,onClick=click).padding(7.dp),verticalAlignment=Alignment.CenterVertically,horizontalArrangement=Arrangement.Center){
-        WbModeIcon(mode,Modifier.size(if(mode in listOf(2,0x8014,0x8015))44.dp else 24.dp,24.dp),if(active)WbAccent else Color.White)
+        WbModeIcon(mode,Modifier.size(if(mode in listOf(2,0x8014,0x8015) || UsbWhiteBalance.isCustom(mode))44.dp else 24.dp,26.dp),if(active)WbAccent else Color.White)
         if(!UsbWhiteBalance.isKelvin(mode) && !UsbWhiteBalance.isCustom(mode) && mode !in listOf(2,0x8014,0x8015))Text(text,color=if(active)WbAccent else Color.White,fontSize=11.sp,modifier=Modifier.padding(start=5.dp))
     }
 }

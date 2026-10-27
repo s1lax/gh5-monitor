@@ -3,6 +3,9 @@ package com.lumixmonitor.ui
 import androidx.compose.foundation.Canvas
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.fillMaxSize
+import androidx.compose.foundation.layout.Row
+import androidx.compose.foundation.layout.fillMaxHeight
+import androidx.compose.foundation.layout.padding
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.ui.Alignment
@@ -12,12 +15,30 @@ import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.Path
 import androidx.compose.ui.graphics.drawscope.Stroke
 import androidx.compose.ui.unit.sp
+import androidx.compose.ui.unit.dp
 import com.lumixmonitor.lumix.UsbWhiteBalance
 import kotlin.math.cos
 import kotlin.math.sin
 
 /** Simple vector symbols using the GH5's familiar WB vocabulary; no emoji font dependency. */
 @Composable internal fun WbModeIcon(mode:Int?,modifier:Modifier,color:Color=Color.White){
+    if(UsbWhiteBalance.isCustom(mode)){
+        Row(modifier,verticalAlignment=Alignment.CenterVertically){
+            Canvas(Modifier.weight(1f).fillMaxHeight()){
+                val s=size.minDimension;val x=(size.width-s)/2;val y=(size.height-s)/2
+                fun p(a:Float,b:Float)=Offset(x+a*s,y+b*s)
+                val stroke=s*.065f
+                for(up in listOf(true,false)){
+                    val a=if(up).1f else .9f;val b=if(up).4f else .6f
+                    val path=Path().apply{moveTo(p(.05f,a).x,p(.05f,a).y);lineTo(p(.28f,a).x,p(.28f,a).y);lineTo(p(.05f,b).x,p(.05f,b).y);close()}
+                    drawPath(path,color,style=Stroke(stroke))
+                }
+                drawRect(color,p(.36f,.22f),androidx.compose.ui.geometry.Size(s*.55f,s*.56f),style=Stroke(stroke))
+            }
+            Text("${mode!!-0x800a}",color=color,fontSize=12.sp,maxLines=1,modifier=Modifier.padding(start=2.dp))
+        }
+        return
+    }
     Box(modifier,contentAlignment=Alignment.Center){
         when{
             mode in listOf(2,0x8014,0x8015)->Text(wbModeName(mode),color=color,fontSize=10.sp,maxLines=1)
@@ -52,7 +73,6 @@ import kotlin.math.sin
                         else->{line(.2f,.5f,.8f,.5f);line(.5f,.2f,.5f,.8f)}
                     }
                 }
-                if(UsbWhiteBalance.isCustom(mode))Text("${mode!!-0x800a}",color=color,fontSize=11.sp,modifier=Modifier.align(Alignment.CenterEnd))
             }
         }
     }

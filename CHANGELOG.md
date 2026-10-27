@@ -2,6 +2,15 @@
 
 This is the first public GH5-focused release. Earlier version entries summarize the local development iterations; separate public release binaries are not provided for every historical version.
 
+## 0.7.2-gh5 — WB capture guards (experimental; detach unresolved)
+
+- Confirm the requested custom-WB cell before entering the reference view and again immediately before capture. Disable measurement while a WB selection is pending.
+- Serialize selection, readback, START and SAMPLE against live-view requests. Remove redundant entry/restart commands and the timed END after successful submission; END remains cancellation/error cleanup.
+- Add a bounded 1.8-second exclusive processing interval after SAMPLE, preventing live-view/telemetry requests during that interval. This last mitigation still needs a successful native measurement test.
+- Keep an unconfirmed-result warning after an interrupted capture; do not silently report a different selected cell as success. Separate the slot digit from the WB vector symbol to avoid overlap.
+- Add an optional debug-only, serial-matched, expiring one-shot ISO/WB-selection rollback for interrupted local hardware tests. No rollback job ships in the APK.
+- Hardware testing still reproduced a USB detach on a brighter WB1 sample before the processing interval was added. Native measurement is not marked fixed.
+
 ## 0.7.1-gh5 — Camera-style USB white balance (in development)
 
 - Split WB selection into presets, K1–K4 temperatures and WB1–WB4 custom references. Use familiar vector WB symbols and yellow selection accents; keep fine adjustment as a separate action labelled with the active mode and any reported shift.

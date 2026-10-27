@@ -85,7 +85,7 @@ private fun FieldMonitorBody(vm:MonitorViewModel){
     val wbEditorOpen=menu=="value" && selectedSetting==SettingKind.WHITE_BALANCE && !vm.isWifi && !clean
     DisposableEffect(wbEditorOpen){onDispose{if(wbEditorOpen)vm.remoteControl.cancelWhiteBalanceMeasurement()}}
     BackHandler(enabled=measuring || clean || menu!=null || vm.selectingAssist || (vm.isWifi && vm.wifi.gallery)){
-        if(measuring)vm.remoteControl.cancelWhiteBalanceMeasurement()
+        if(measuring){if(!vm.remoteControl.whiteBalanceBusy)vm.remoteControl.cancelWhiteBalanceMeasurement()}
         else if(vm.isWifi && vm.wifi.gallery)vm.wifi.cardFiles.back() else {clean=false;menu=null;vm.cancelAssistSelection()}
     }
     LaunchedEffect(clean){cleanHint=clean;if(clean){delay(3000);cleanHint=false}}

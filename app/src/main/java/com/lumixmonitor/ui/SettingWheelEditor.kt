@@ -46,8 +46,8 @@ private val WheelQuiet=Color(0xFF9CA9B5)
 internal fun SettingWheelEditor(vm:MonitorViewModel,kind:SettingKind,modifier:Modifier,
     chooseKind:(SettingKind)->Unit,close:()->Unit){
     val values=remember(kind,vm.isDemo,vm.settings,vm.isWifi,vm.wifi.options,vm.wifi.values){vm.allowedSettings(kind)}
-    val cameraValue=vm.currentSettingValue(kind)
     val usbWb=kind==SettingKind.WHITE_BALANCE && !vm.isWifi && !vm.isDemo
+    val cameraValue=if(usbWb)vm.pendingWhiteBalance ?: vm.currentSettingValue(kind) else vm.currentSettingValue(kind)
     Column(modifier.background(Color(0xFF14191E),RoundedCornerShape(topStart=12.dp,topEnd=12.dp)).verticalScroll(rememberScrollState()).padding(horizontal=12.dp,vertical=8.dp)){
         Row(Modifier.fillMaxWidth(),verticalAlignment=Alignment.CenterVertically){
             Text(if(usbWb)"Баланс белого" else kind.label,color=Color.White,fontSize=14.sp,fontWeight=FontWeight.Medium,modifier=Modifier.weight(1f))

@@ -410,6 +410,15 @@ class LumixCamera(private val transport: PtpUsbTransport) {
     fun setWhiteBalance(code: Int): Boolean =
         setDevicePropValue(LumixProp.WHITE_BALANCE_PARAM, 2, code)
 
+    fun captureWhiteBalance(mode:Int)=transport.exclusiveControl {
+        UsbWhiteBalance.captureSelected(mode,::setWhiteBalance,
+            {getDevicePropDesc(LumixProp.WHITE_BALANCE,2)?.current},remote::whiteBalanceMeasure){
+            // WB capture can momentarily stall bulk IN. Keep live-view and telemetry
+            // out of this processing interval, rather than consuming a failed data phase.
+            Thread.sleep(1800)
+        }
+    }
+
     fun setColorTemperature(kelvin: Int): Boolean =
         setDevicePropValue(LumixProp.WHITE_BALANCE_K_SET, 2, kelvin)
 

@@ -6,6 +6,35 @@ import org.junit.Assert.*
 import org.junit.Test
 
 class UsbWhiteBalanceTest {
+    @Test fun captureSettlesOnlyAfterAcknowledgedSampleWithoutAnEnd(){
+        val calls=mutableListOf<String>()
+        UsbWhiteBalance.captureSelected(0x800b,{calls+="select";true},{calls+="read";0x800b},{calls+=it.toString();true},{calls+="settle"})
+        assertEquals(listOf("select","read",UsbWhiteBalance.START.toString(),UsbWhiteBalance.SAMPLE.toString(),"settle"),calls)
+        var settled=false
+        try{UsbWhiteBalance.captureSelected(0x800b,{true},{0x800e},{true},{settled=true});fail("wrong target accepted")}catch(_:IllegalStateException){}
+        assertFalse(settled)
+    }
+    @Test fun sampleConfirmsEachRequestedSlotAndDoesNotEndSuccessfulCapture(){
+        for(mode in 0x800b..0x800e){
+            var actual=0x800e;val operations=mutableListOf<Int>()
+            UsbWhiteBalance.captureSelected(mode,{actual=it;true},{actual},{operations+=it;true})
+            assertEquals(mode,actual);assertEquals(listOf(UsbWhiteBalance.START,UsbWhiteBalance.SAMPLE),operations)
+        }
+    }
+    @Test fun missingSlotAcknowledgementNeverStartsOrSamples(){
+        val controls=mutableListOf<Int>()
+        for(accepted in listOf(false,true)){
+            try{UsbWhiteBalance.captureSelected(0x800b,{accepted},{0x800e},{controls+=it;true});fail("wrong cell accepted")}catch(_:IllegalStateException){}
+        }
+        assertTrue(controls.isEmpty())
+    }
+    @Test fun rejectedCaptureCancelsWithoutRetryingTheSample(){
+        for(rejected in listOf(UsbWhiteBalance.START,UsbWhiteBalance.SAMPLE)){
+            val calls=mutableListOf<Int>()
+            try{UsbWhiteBalance.captureSelected(0x800b,{true},{0x800b},{calls+=it;it!=rejected});fail("rejection ignored")}catch(_:IllegalStateException){}
+            assertEquals(UsbWhiteBalance.END,calls.last());assertEquals(1,calls.count{it==rejected})
+        }
+    }
     @Test fun familiesKeepCustomAndKelvinSlotsOutOfPresets(){
         for(mode in 0x800b..0x800e)assertEquals("Замер",UsbWhiteBalance.family(mode))
         for(mode in 0x8010..0x8013)assertEquals("Кельвины",UsbWhiteBalance.family(mode))

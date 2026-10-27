@@ -12,6 +12,17 @@ object UsbWhiteBalance {
     fun isCustom(mode:Int?)=mode!=null && mode in 0x800b..0x800e
     fun family(mode:Int?)=when{isKelvin(mode)->"Кельвины";isCustom(mode)->"Замер";else->"Пресеты"}
     fun slot(mode:Int)=mode-0x800a
+    /** Match Tether's select -> START -> SAMPLE path; END is cancellation/error cleanup. */
+    fun captureSelected(mode:Int,select:(Int)->Boolean,current:()->Int?,control:(Int)->Boolean,settle:()->Unit={}){
+        require(isCustom(mode)){"Выберите WB1–WB4"}
+        check(select(mode)){"GH5 отклонила выбор WB${slot(mode)}"}
+        check(current()==mode){"GH5 не подтвердила WB${slot(mode)} — замер не отправлен"}
+        try{
+            check(control(START)){"GH5 отклонила вход в замер"}
+            check(control(SAMPLE)){"GH5 отклонила замер"}
+        }catch(t:Throwable){runCatching{control(END)};throw t}
+        settle()
+    }
     fun temperature(mode:Int?,reportedMode:Int?,kelvin:Int?):Int?=
         kelvin?.takeIf{isKelvin(mode) && mode==reportedMode && it in 1000..100000}
     fun accepted(code:Int,result:Int)=result==0x2001 || (code==END && result==0x201d)

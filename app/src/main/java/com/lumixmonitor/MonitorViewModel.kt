@@ -284,7 +284,11 @@ class MonitorViewModel(application: Application) : AndroidViewModel(application)
         return if(k!=null)"${settings.whiteBalance} ${k}K" else settings.whiteBalance
     }
     var whiteBalanceReference by mutableStateOf<WhiteBalanceReference?>(null);private set
-    fun beginWhiteBalanceMeasurement(){whiteBalanceReference=null;lastWbReferenceAt=0L;remoteControl.beginWhiteBalanceMeasurement()}
+    var pendingWhiteBalance by mutableStateOf<Int?>(null);private set
+    fun beginWhiteBalanceMeasurement(){
+        val mode=pendingWhiteBalance ?: currentSettingValue(SettingKind.WHITE_BALANCE) ?: return
+        whiteBalanceReference=null;lastWbReferenceAt=0L;remoteControl.beginWhiteBalanceMeasurement(mode)
+    }
     private var lastWbReferenceAt=0L
     private fun updateWhiteBalanceReference(bitmap:Bitmap){
         if(!remoteControl.whiteBalanceMeasuring)return
@@ -600,6 +604,10 @@ class MonitorViewModel(application: Application) : AndroidViewModel(application)
             statusText = "Открытие сессии…"
             newCamera.open()
             if (!isCurrent(token)) throw CancellationException("подключение отменено")
+            if(BuildConfig.DEBUG)runCatching{
+                Class.forName("com.lumixmonitor.DebugDeviceRestore").getMethod("restore",Application::class.java,LumixCamera::class.java,UsbDevice::class.java)
+                    .invoke(null,getApplication<Application>(),newCamera,device)
+            }.onFailure{PtpLog.add("Debug device restore: ${it.cause?.message ?: it.message}")}
             camera = newCamera
             cameraModel = newCamera.deviceInfo?.displayName
             captureFeedback=""
@@ -690,6 +698,7 @@ class MonitorViewModel(application: Application) : AndroidViewModel(application)
         neutralPreview=false
         if(graceful && transport?.isSynchronized==true)camera?.let{cam->runCatching{remoteControl.endWhiteBalanceMeasurement(cam)}}
         remoteControl.reset()
+        pendingWhiteBalance=null
         stopProxy()
         val previousLoop = liveview
         val previousTransport = transport
@@ -1390,11 +1399,12 @@ class MonitorViewModel(application: Application) : AndroidViewModel(application)
         val token=generation.get()
         val sequence=settingWriteRequests.computeIfAbsent(kind){AtomicLong()}
         val request=sequence.incrementAndGet()
+        if(kind==SettingKind.WHITE_BALANCE)pendingWhiteBalance=value
         io.execute{
             // Scroll gestures can outpace USB: skip superseded queued writes.
             if(!isCurrent(token) || sequence.get()!=request)return@execute
             val cam=camera ?: return@execute
-            if(propDescs[kind]?.allowed?.contains(value)!=true)return@execute
+            if(propDescs[kind]?.allowed?.contains(value)!=true){if(kind==SettingKind.WHITE_BALANCE)mainHandler.post{if(sequence.get()==request)pendingWhiteBalance=null};return@execute}
             try{
                 val ok=cam.setDevicePropValue(kind.paramCode,kind.valueSize,value)
                 if(isCurrent(token) && sequence.get()==request){
@@ -1402,6 +1412,7 @@ class MonitorViewModel(application: Application) : AndroidViewModel(application)
                     if(ok){refreshSettings(setOf(kind.propCode));if(kind==SettingKind.WHITE_BALANCE)remoteControl.requestRefresh()}
                 }
             }catch(t:Throwable){if(isCurrent(token) && sequence.get()==request)statusText="${kind.label}: ${t.message}"}
+            finally{if(kind==SettingKind.WHITE_BALANCE)mainHandler.post{if(sequence.get()==request)pendingWhiteBalance=null}}
         }
     }
 

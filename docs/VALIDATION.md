@@ -1,5 +1,19 @@
 # Validation record
 
+## 0.7.2-gh5 WB capture investigation
+
+**139 JVM tests pass** with no failures, errors or skipped tests. Added cases cover confirmation of each requested WB cell, rejecting a mismatched readback before START/SAMPLE, single cancellation after rejected controls, absence of END after accepted submission and settling only after accepted capture.
+
+Observed on GH5 / OnePlus 8 Pro / Android 13:
+
+- Fresh selection/readback and START/END without sampling retained both WB1 and WB4 independently.
+- A revised select/readback/START/SAMPLE sequence, without the old timed END, submitted WB1 at the user's ISO 200. GH5 returned its asynchronous white-set failure event. The app returned to WB1 and the stream continued near 30 FPS.
+- A bounded brighter attempt at temporary ISO 1600, after WB4 → WB1 selection, still detached USB about 0.14 seconds after SAMPLE acknowledgement. The last interleaved live-view request was visible in the log. This is not evidence of successful calibration or the actual storage cell.
+- The final revision therefore adds a 1.8-second exclusive processing interval after SAMPLE and retains an unconfirmed-result warning. **This final mitigation is not hardware-verified:** GH5 stopped enumerating after the brighter attempt. Standard phone USB-port reset and role-switch requests did not restore it. Native measurement is not marked fixed.
+- Slot symbols were visually checked with separate, non-overlapping digits in the revised installed UI before the final processing interval was added.
+
+The user's initial ISO 200 and WB4 selection could not be immediately restored after the detach. A private, serial-matched rollback job was staged for the next successful connection, with a 24-hour expiry. The debug-only helper checks camera-advertised values, writes only ISO and WB selection, reads them back and removes the job after confirmation. No job, serial, image, third-party resource or device log is distributed. Its execution remains pending physical camera re-entry into PC(Tether). It restores selection, not overwritten calibration data.
+
 ## 0.7.1-gh5 White Set layout
 
 **135 JVM tests pass** with no failures, errors or skipped tests. New tests check WB-family separation and centered, bounded reference sampling at tiny, HD and 4K image dimensions.

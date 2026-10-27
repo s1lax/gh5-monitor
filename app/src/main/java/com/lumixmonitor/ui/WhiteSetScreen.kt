@@ -19,7 +19,7 @@ import com.lumixmonitor.SettingKind
     val r=vm.remoteControl
     Box(modifier.semantics{contentDescription="Экран замера ББ White Set"}){
         Row(Modifier.align(Alignment.TopCenter).fillMaxWidth().background(Color.Black.copy(alpha=.75f)).padding(horizontal=10.dp,vertical=4.dp),verticalAlignment=Alignment.CenterVertically){
-            WbAction("‹ Назад",Modifier.width(92.dp)){r.cancelWhiteBalanceMeasurement()}
+            WbAction("‹ Назад",Modifier.width(92.dp),enabled=!r.whiteBalanceBusy){r.cancelWhiteBalanceMeasurement()}
             WbModeIcon(vm.currentSettingValue(SettingKind.WHITE_BALANCE),Modifier.padding(horizontal=10.dp).size(32.dp),WbAccent)
             Text("${wbModeName(vm.currentSettingValue(SettingKind.WHITE_BALANCE))} · White Set",color=Color.White,fontSize=16.sp)
         }
