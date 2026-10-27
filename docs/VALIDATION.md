@@ -1,5 +1,15 @@
 # Validation record
 
+## 0.6.2-gh5 shooting-mode readout and resolution research
+
+**124 JVM tests pass**, with no failures, errors or skipped tests. New cases distinguish photo M from Creative Movie M, parse its separate exposure-program field, clear stale submodes on mode changes, ignore inactive mode entries and handle custom/automatic/unknown modes.
+
+On the development GH5 / OnePlus 8 Pro / Android 13, the installed build displayed **M**, then **Видео M** after one advertised remote mode change, then **M** after restoring the original photo mode. Both labels were verified in the actual phone UI. All four UI orientations retained one Wi-Fi session, a centered shutter and the manually selected preview angle; the user's original angle was restored. Final checks confirmed fresh 640×360 frames at approximately 30 FPS, recording off, native assist off and no fatal entries for the test process. This is a short hardware check, not a long-run stability result.
+
+The camera advertised only VGA/QVGA Wi-Fi sizes. Four bounded `liveviewsize` candidates (`hd`, `fhd`, `1280x720`, `1920x1080`) returned `err_param`. A subsequent direct size query returned `err_critical`, and the next connection delivered QVGA despite a VGA menu value. Selecting the advertised VGA option through the app restored actual 640×360 JPEGs. Unsupported probes are excluded from production operation; rejected commands must not be assumed to have no side effects on this firmware. References and the distinction between native input, upscaling and USB preview are recorded in [WIFI.md](WIFI.md#higher-resolution-research).
+
+The prior Camera-priority MF Assist rejection and Smartphone-priority success remain the hardware evidence for that restriction. The manual permits Camera priority for simultaneous body/phone operation with limited remote controls; no full-control bypass was established. USB mode display reuses existing property readout; a fresh USB hardware check was not performed for this badge-only change.
+
 ## 0.6.1-gh5 Wi-Fi focus and files
 
 **119 JVM tests pass**, with no failures, errors or skipped tests. Added tests cover native assist CSV replies and advertised limits, battery precision, missing/dual-card fields, SOAP/DIDL parsing, unsafe resource URLs, XML entities and bounded binary HTTP transfers.

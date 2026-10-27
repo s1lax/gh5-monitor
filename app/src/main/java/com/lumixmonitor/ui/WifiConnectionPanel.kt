@@ -41,6 +41,7 @@ internal fun WifiConnectPanel(vm:MonitorViewModel){
 internal fun WifiCameraPanel(vm:MonitorViewModel,openSetting:(SettingKind)->Unit){
     val wifi=vm.wifi;val t=wifi.telemetry;val quiet=Color(0xFF9CA9B5)
     Text("${wifi.model} · Wi-Fi",color=Color(0xFFB4E4CC),fontSize=16.sp)
+    Text("Режим камеры: ${wifi.shootingMode}",color=Color.White,fontSize=15.sp)
     Text("${t.statusText} · ${vm.actualFrameSize ?: "Ожидание кадра"}",color=Color.White,fontSize=13.sp)
     Text(vm.performanceText,color=quiet,fontSize=11.sp)
     WifiStateDetails(vm)

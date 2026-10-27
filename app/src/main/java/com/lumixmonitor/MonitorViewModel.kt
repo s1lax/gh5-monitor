@@ -272,7 +272,8 @@ class MonitorViewModel(application: Application) : AndroidViewModel(application)
         SettingKind.EXPOSURE->"exposure";SettingKind.WHITE_BALANCE->"whitebalance";SettingKind.PHOTO_STYLE->"photostyle"
         SettingKind.AF_MODE->"focusmode";SettingKind.AF_ZONE->"afmode";else->null
     }
-    private fun wifiSettings()=CameraSettings(mode="Wi-Fi",iso=wifi.text("iso"),shutter=wifi.text("shtrspeed"),
+    val shootingModeText:String get()=if(isWifi)wifi.shootingMode else if(settings.mode=="video")"Видео" else settings.mode
+    private fun wifiSettings()=CameraSettings(mode=wifi.shootingMode,iso=wifi.text("iso"),shutter=wifi.text("shtrspeed"),
         aperture=wifi.text("focal"),exposureComp=wifi.text("exposure"),whiteBalance=wifi.text("whitebalance"),
         photoStyle=wifi.text("photostyle"),afMode=wifi.text("focusmode"),afZone=wifi.text("afmode"))
     fun showConnectionSetup(wireless:Boolean){

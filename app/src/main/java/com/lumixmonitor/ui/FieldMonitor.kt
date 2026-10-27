@@ -139,7 +139,7 @@ private fun FieldMonitorBody(vm:MonitorViewModel){
                 Row(Modifier.fillMaxWidth().height(58.dp).padding(horizontal=6.dp),verticalAlignment=Alignment.CenterVertically){
                     Rail("Меню","≡",active=menu!=null,horizontal=true,cellWidth=64.dp){menu=if(menu==null)"tools" else null}
                     Column(Modifier.weight(1f),horizontalAlignment=Alignment.CenterHorizontally){
-                        Text("$connectionLabel · $fps",color=Accent,fontSize=12.sp)
+                        Text("${vm.shootingModeText} · $connectionLabel · $fps",color=Accent,fontSize=12.sp)
                         Text(cameraStatus,color=Quiet,fontSize=10.sp)
                     }
                     Rail("${vm.previewQuarterTurns*90}°","↻",horizontal=true,cellWidth=48.dp){vm.rotatePreview()}
@@ -172,6 +172,7 @@ private fun FieldMonitorBody(vm:MonitorViewModel){
                     }
                     Rail("${vm.previewQuarterTurns*90}°","↻",cellHeight=44.dp){vm.rotatePreview()}
                     Rail("Чистый","↔",cellHeight=44.dp){clean=true;menu=null}
+                    Text(vm.shootingModeText,color=Accent,fontSize=12.sp,maxLines=1,modifier=Modifier.semantics{contentDescription="Режим камеры: ${vm.shootingModeText}"})
                     Text(connectionLabel,color=if(vm.isDemo)Color(0xFFFFCC80) else Accent,fontSize=10.sp)
                     Text(fps,color=Quiet,fontSize=8.sp)
                     Text(cameraStatus,color=Quiet,fontSize=8.sp,maxLines=1)

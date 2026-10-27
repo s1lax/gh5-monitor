@@ -91,10 +91,9 @@ class WifiSettingsCatalog {
         val flags=mutableMapOf<String,Boolean>();val current=values.toMutableMap();val nodes=reply.root.getElementsByTagName("item")
         for(i in 0 until nodes.length){val e=nodes.item(i) as Element;val id=e.getAttribute("id")
             flags[id]=e.getAttribute("enable")!="no"
-            if(id=="menu_item_id_recmode" && e.hasAttribute("value"))current["recmode"]=e.getAttribute("value")
             if(e.hasAttribute("value"))options.filter{it.settingId==id}.map{it.type}.distinct().forEach{current[it]=e.getAttribute("value")}
         }
-        enabled=flags;values=current
+        enabled=flags;values=current+WifiShootingMode.fields(reply)
     }
     fun applyValues(next:Map<String,String>){values=values+next+next["sspeed"]?.let{mapOf("shtrspeed" to it)}.orEmpty()}
     fun applyLens(reply:WifiReply){

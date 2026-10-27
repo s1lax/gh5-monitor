@@ -179,6 +179,7 @@ class WifiCameraController(private val app:Application,
         post(s.token){options=list;values=current;telemetry=t;cameraStatus=status}
     }
     fun choices(type:String)=options[type].orEmpty()
+    val shootingMode:String get()=WifiShootingMode.label(values["recmode"],values["recmode_detail"])
     fun current(type:String)=values[type]?.let{v->choices(type).firstOrNull{it.value==v || it.optionId==v}}
     fun text(type:String):String {
         if(type=="whitebalance" && values[type]?.startsWith("color_temp")==true)

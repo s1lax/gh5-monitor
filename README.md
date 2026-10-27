@@ -14,21 +14,21 @@ Created and tested by **[s1lax](https://github.com/s1lax)**, developed with **GP
 
 > **Experimental, first public preview: 0.5.3-gh5.** The app has been tested with one GH5 and one phone, not a broad compatibility matrix. The current in-app labels are Russian; this repository's documentation is in English. Contributions for English UI localization are welcome.
 
-The `feature/wifi-monitor` branch adds **0.6.1-gh5** Wi-Fi support using local camera HTTP commands and UDP JPEG preview, including native MF Assist and card browsing. The published 0.5.3 release remains USB-only. See the [Wi-Fi guide](docs/WIFI.md) for setup, verified behavior and latency limits.
+The `feature/wifi-monitor` branch adds **0.6.2-gh5** Wi-Fi support using local camera HTTP commands and UDP JPEG preview, including native MF Assist, shooting-mode readout and card browsing. The published 0.5.3 release remains USB-only. See the [Wi-Fi guide](docs/WIFI.md) for setup, verified behavior and latency limits.
 
 ## What it can do
 
 | Area | Features |
 | --- | --- |
 | USB live view | Camera-advertised quality selection, JPEG preview, recovery after temporary interruptions, performance diagnostics |
-| Wi-Fi preview (0.6.1 branch) | Direct hotspot or shared LAN, local-IP entry / SSDP discovery, newest-frame UDP decoding, explicit frozen-frame warning, camera controls and advertised setting choices |
+| Wi-Fi preview (0.6.2 branch) | Direct hotspot or shared LAN, local-IP entry / SSDP discovery, newest-frame UDP decoding, explicit frozen-frame warning, camera controls and advertised setting choices |
 | Field monitor UI | Portrait and landscape layouts, centered shutter, clean view, simultaneous tools, visible manual preview-rotation button independent of UI orientation |
 | Focus | **Camera-native MF Assist**, remembered phone-selected area, navigator, hold-to-repeat movement and ±1× magnification; separate 1:1 display inspection and app focus peaking |
 | Exposure tools | Zebra, false color, histogram / RGB histogram, waveform and vectorscope, calculated from the received preview |
 | Framing | Rule of thirds, center marker, aspect guides, safe area, camera level, image rotation and anamorphic desqueeze |
 | Viewing | Import `.cube` 3D LUTs, adjustable LUT strength, display-only EV / gamma / contrast correction |
 | Camera control | ISO, shutter, aperture, exposure compensation and WB through scrolling value selectors; AF, shutter, video REC / STOP, supported profile and video settings |
-| Camera status | Recording state, available exposure / AF / capacity data; Wi-Fi adds dual-slot status, camera battery bars, temperature category and warnings |
+| Camera status | Shooting mode, recording state, available exposure / AF / capacity data; Wi-Fi distinguishes photo M from Creative Movie M and adds dual-slot status, camera battery bars, temperature category and warnings |
 | Files | Save preview JPEGs; record a silent phone MP4 proxy; browse camera stills and transfer originals where supported, including verified JPEG transfers over Wi-Fi |
 | Diagnosis | Capture matched photo/video preview stages with read-only camera parameters and export JPEG + PNG + JSON as a ZIP |
 | Demo | Local moving test scene without a camera |

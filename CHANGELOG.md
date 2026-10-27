@@ -2,6 +2,13 @@
 
 This is the first public GH5-focused release. Earlier version entries summarize the local development iterations; separate public release binaries are not provided for every historical version.
 
+## 0.6.2-gh5 — Shooting-mode readout (in development)
+
+- Show the camera-reported shooting mode in portrait and landscape: P/A/S/M, Creative Movie with its separate exposure program, iA/iA+ and custom modes over Wi-Fi. USB displays its existing reported mode.
+- Reuse the current-menu poll; this read-only indicator adds no per-frame camera requests and does not change the mode dial or shutter action.
+- Document Camera/Smartphone priority tradeoffs and higher-resolution research. Four unsupported Wi-Fi size candidates were rejected; no native HD Wi-Fi bypass is established.
+- 124 JVM tests pass, including separate photo/video mode parsing and stale-submode prevention.
+
 ## 0.6.1-gh5 — Native Wi-Fi focus, camera status and card files (in development)
 
 - Add native GH5 Wi-Fi MF Assist, camera-returned scale/coordinates, a navigator, ±1× hold controls and native drag/pinch gestures.
