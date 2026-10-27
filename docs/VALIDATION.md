@@ -1,5 +1,46 @@
 # Validation record
 
+## 0.7.2-gh5 WB capture investigation
+
+**139 JVM tests pass** with no failures, errors or skipped tests. Added cases cover confirmation of each requested WB cell, rejecting a mismatched readback before START/SAMPLE, single cancellation after rejected controls, absence of END after accepted submission and settling only after accepted capture.
+
+Observed on GH5 / OnePlus 8 Pro / Android 13:
+
+- Fresh selection/readback and START/END without sampling retained both WB1 and WB4 independently.
+- A revised select/readback/START/SAMPLE sequence, without the old timed END, submitted WB1 at the user's ISO 200. GH5 returned its asynchronous white-set failure event. The app returned to WB1 and the stream continued near 30 FPS.
+- A bounded brighter attempt at temporary ISO 1600, after WB4 → WB1 selection, still detached USB about 0.14 seconds after SAMPLE acknowledgement. The last interleaved live-view request was visible in the log. This is not evidence of successful calibration or the actual storage cell.
+- The final revision therefore adds a 1.8-second exclusive processing interval after SAMPLE and retains an unconfirmed-result warning. **This final mitigation is not hardware-verified:** GH5 stopped enumerating after the brighter attempt. Standard phone USB-port reset and role-switch requests did not restore it. Native measurement is not marked fixed.
+- Slot symbols were visually checked with separate, non-overlapping digits in the revised installed UI before the final processing interval was added.
+
+The user's initial ISO 200 and WB4 selection could not be immediately restored after the detach. A private, serial-matched rollback job was staged for the next successful connection, with a 24-hour expiry. The debug-only helper checks camera-advertised values, writes only ISO and WB selection, reads them back and removes the job after confirmation. No job, serial, image, third-party resource or device log is distributed. Its execution remains pending physical camera re-entry into PC(Tether). It restores selection, not overwritten calibration data.
+
+## 0.7.1-gh5 White Set layout
+
+**135 JVM tests pass** with no failures, errors or skipped tests. New tests check WB-family separation and centered, bounded reference sampling at tiny, HD and 4K image dimensions.
+
+On GH5 / OnePlus 8 Pro / Android 13, the new UI was checked for preset-only entries, four K slots, four WB slots, a mode-labelled fine-adjustment screen and native measurement entry without sampling. Portrait and landscape screenshots confirmed the yellow guide and reachable SET / Back controls. Fresh USB JPEGs continued during measurement, Android Back returned to WB selection and the same USB camera instance survived the orientation change. The pre-test WB1 selection and orientation request were restored. This check did not overwrite a custom measurement.
+
+After final text-width refinements, the installed build was checked again for readable AWB/AWBc/AWBw, WB1-labelled fine adjustment, White Set entry and on-screen Back with a closed-state confirmation. Grid tap/drag readback and Center passed in the scrollable editor; original axis values were restored. Final smoke: fresh 1280×720 USB JPEGs at approximately 30 FPS, Video M, WB1, recording off, measurement closed, the user's 90° preview angle and no fatal entries for that process. The distributed debug APK's SHA-256 matches the installed APK.
+
+The visual center guide approximates the native White Set screen. GH5 does not provide its exact sensor ROI through the implemented USB commands. Brightness describes decoded JPEG samples from the displayed guide; it is not a calibrated sensor measurement. Successful neutral-reference calibration and long-run reliability remain unverified.
+
+## 0.7.0-gh5 USB white balance
+
+**133 JVM tests pass**, with no failures, errors or skipped tests. Added cases cover native white-set packet lengths and UINT32 coordinates, rejection of unrelated control IDs and vendor events, an already-closed END reply, matched-slot Kelvin display, movie exposure labels, grid coordinate round trips and preview brightness warnings.
+
+Checked with the development GH5 and OnePlus 8 Pro / Android 13 over USB PC(Tether), using phone Wi-Fi debugging:
+
+- The main monitor reports Creative Video **Видео M** from the dial-position property and separate movie exposure program.
+- K1–K4 read as independent slots. Main-editor temperature writes/readback were checked at K1 5300 → 5400 K and K2 4000 → 4100 K, then restored. K3 3200 K and K4 5600 K were read. These were the values at that test, not factory defaults.
+- A/B +1 and G/M −1 writes were acknowledged and read back, then restored. Additional bounded ±3 checks confirmed that positive A/B adds blue and positive G/M adds green. The grid labels use that hardware-checked polarity.
+- Grid taps and drags produced the requested B3/G3 and A3/G3 values; Center reset both axes. Portrait/landscape controls remained reachable and the USB camera instance survived the orientation change. Current per-mode shifts were restored after the test.
+- Native measurement START/END were acknowledged without changing the selected custom WB properties. After changing WB during an open measurement, the new implementation returned to entry and allowed repeated entry/exit. The test uses a camera WB write, not a physical dial gesture; the user separately reported the original problem after body WB changes.
+- The first implementation accepted sampling but later received camera event `0xC212`, matching the user's report that GH5 rejected the dark reference. After manual WB changes, stale SAMPLE/END calls returned `InvalidParameter`. The final implementation handles the failure event and already-closed END separately, re-enters before sampling and clears stale state on a fresh WB-mode change.
+- Two subsequent samples each received command acceptance followed by `0xC212` with white-set failure ID `0x12800042`. Both returned to the entry screen with a failure message and allowed another attempt. Unrelated vendor-event parameters are ignored. This checks failure recovery, not successful neutral-reference calibration.
+- The final installed 0.7.0 build passed a repeated grid tap/drag/readback and landscape-fit check with the same USB camera instance. A closing smoke check found fresh 1280×720 JPEGs at approximately 30 FPS, Video M, WB4 selected, measurement closed, recording off and no fatal entries for that process. The user's 90° preview angle and manual exposure changes were retained. These are short session checks, not long-run reliability or end-to-end latency measurements.
+
+The user also changed camera exposure/WB while testing. Those manual exposure changes were preserved. WB1 was designated as the disposable measurement-test cell with the user's authorization; the selected mode was returned to WB4. A valid neutral-reference measurement and colorimetric accuracy are not established by a command acknowledgement. The exact reason field for the camera failure is not decoded. Central brightness is a bounded, rate-limited analysis of decoded USB JPEG pixels before phone viewing correction; it is not a calibrated sensor meter. Wi-Fi behavior and the rendering/peaking/zebra pipeline were not changed.
+
 ## 0.6.3-gh5 mode refresh cadence
 
 **124 JVM tests pass**, with no failures, errors or skipped tests, and the debug APK build succeeded. ADB reported successful installation on the development phone. Foreground current-menu polling now runs every supervisor cycle before lens reads, replacing the previous every-fifth-cycle refresh. Polling remains serialized and uses fixed delay, so slow camera requests do not create catch-up polls.

@@ -26,6 +26,7 @@ class LumixCamera(private val transport: PtpUsbTransport) {
 
     /** Уведомление о появлении нового файла. */
     var onObjectAdded: ((Int) -> Unit)? = null
+    var onWhiteBalanceFailed: ((IntArray) -> Unit)? = null
 
     private var sessionOpen = false
 
@@ -50,6 +51,11 @@ class LumixCamera(private val transport: PtpUsbTransport) {
                 LumixEvent.OBJECT_ADDED -> {
                     PtpLog.add("новый файл: ${container.firstParameter()}")
                     onObjectAdded?.invoke(container.firstParameter())
+                }
+                0xC212 -> {
+                    val parameters=container.parameters()
+                    PtpLog.add("WB measurement failed event: ${parameters.joinToString()}")
+                    if(UsbWhiteBalance.isFailureEvent(container.code,container.firstParameter()))onWhiteBalanceFailed?.invoke(parameters)
                 }
                 else -> if (container.code != 0xC107) PtpLog.add("событие 0x%04X".format(container.code))
             }
@@ -403,6 +409,15 @@ class LumixCamera(private val transport: PtpUsbTransport) {
 
     fun setWhiteBalance(code: Int): Boolean =
         setDevicePropValue(LumixProp.WHITE_BALANCE_PARAM, 2, code)
+
+    fun captureWhiteBalance(mode:Int)=transport.exclusiveControl {
+        UsbWhiteBalance.captureSelected(mode,::setWhiteBalance,
+            {getDevicePropDesc(LumixProp.WHITE_BALANCE,2)?.current},remote::whiteBalanceMeasure){
+            // WB capture can momentarily stall bulk IN. Keep live-view and telemetry
+            // out of this processing interval, rather than consuming a failed data phase.
+            Thread.sleep(1800)
+        }
+    }
 
     fun setColorTemperature(kelvin: Int): Boolean =
         setDevicePropValue(LumixProp.WHITE_BALANCE_K_SET, 2, kelvin)

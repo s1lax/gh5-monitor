@@ -44,6 +44,11 @@ class PtpUsbTransport(
     private val endpointEvent: UsbEndpoint?,
 ) {
     private val ioLock = ReentrantLock(true)
+    /** A short native control sequence must not be interleaved with live-view requests. */
+    internal fun <T> exclusiveControl(block:()->T):T {
+        ioLock.lock()
+        try { ensureOpen();return block() } finally { ioLock.unlock() }
+    }
     private var transactionCounter = 0
 
     @Volatile

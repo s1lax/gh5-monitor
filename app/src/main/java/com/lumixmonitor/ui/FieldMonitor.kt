@@ -55,6 +55,7 @@ import com.lumixmonitor.monitor.Scopes
 import com.lumixmonitor.monitor.ImageGeometry
 import com.lumixmonitor.monitor.ScopeRaster
 import com.lumixmonitor.monitor.DisplayCalibration
+import com.lumixmonitor.lumix.WhiteBalanceRegion
 import kotlinx.coroutines.delay
 import kotlin.math.abs
 import kotlin.math.ln
@@ -80,8 +81,12 @@ private fun FieldMonitorBody(vm:MonitorViewModel){
     var quality by remember{mutableStateOf(false)}
     var clean by remember{mutableStateOf(false)}
     var cleanHint by remember{mutableStateOf(false)}
-    BackHandler(enabled=clean || menu!=null || vm.selectingAssist || (vm.isWifi && vm.wifi.gallery)){
-        if(vm.isWifi && vm.wifi.gallery)vm.wifi.cardFiles.back() else {clean=false;menu=null;vm.cancelAssistSelection()}
+    val measuring=vm.remoteControl.whiteBalanceMeasuring && !vm.isWifi
+    val wbEditorOpen=menu=="value" && selectedSetting==SettingKind.WHITE_BALANCE && !vm.isWifi && !clean
+    DisposableEffect(wbEditorOpen){onDispose{if(wbEditorOpen)vm.remoteControl.cancelWhiteBalanceMeasurement()}}
+    BackHandler(enabled=measuring || clean || menu!=null || vm.selectingAssist || (vm.isWifi && vm.wifi.gallery)){
+        if(measuring){if(!vm.remoteControl.whiteBalanceBusy)vm.remoteControl.cancelWhiteBalanceMeasurement()}
+        else if(vm.isWifi && vm.wifi.gallery)vm.wifi.cardFiles.back() else {clean=false;menu=null;vm.cancelAssistSelection()}
     }
     LaunchedEffect(clean){cleanHint=clean;if(clean){delay(3000);cleanHint=false}}
     LaunchedEffect(vm.wifi.gallery){if(vm.wifi.gallery){menu=null;clean=false}}
@@ -109,13 +114,13 @@ private fun FieldMonitorBody(vm:MonitorViewModel){
     val preview: @Composable ()->Unit = {
         Column(Modifier.fillMaxSize()){
         Box(Modifier.weight(1f).fillMaxWidth(),contentAlignment=Alignment.Center){
-            if(frame==null)Text("Ожидание кадра…",color=Quiet) else CameraViewport(vm,frame,allowTouchAf=!clean,onTap={if(clean)clean=false},onLongPress={clean=!clean;menu=null})
-            if((vm.focusAssistActive || vm.selectingAssist) && !clean && !vm.isDemo){
+            if(frame==null)Text("Ожидание кадра…",color=Quiet) else CameraViewport(vm,frame,allowTouchAf=!clean && !measuring,onTap={if(clean)clean=false},onLongPress={if(!measuring){clean=!clean;menu=null}})
+            if((vm.focusAssistActive || vm.selectingAssist) && !clean && !vm.isDemo && !measuring){
                 val nav=Modifier.align(Alignment.BottomEnd).padding(6.dp).width(164.dp)
                 if(vm.isWifi)WifiAssistNavigator(vm,nav) else AssistNavigator(vm.remoteControl,vm.previewQuarterTurns,nav,showScale=true,scaleEnabled=vm.cameraFocusAssist)
             }
             if(vm.isWifi)WifiFrameNotice(vm,Modifier.align(Alignment.TopCenter))
-            if(vm.heldFrame!=null)Text("СТОП-КАДР",color=Color(0xFFFFCC80),modifier=Modifier.align(Alignment.TopStart).background(Panel).padding(6.dp))
+            if(vm.heldFrame!=null && !measuring)Text("СТОП-КАДР",color=Color(0xFFFFCC80),modifier=Modifier.align(Alignment.TopStart).background(Panel).padding(6.dp))
         }
         if(vm.isWifi && !clean)WifiStatusStrip(vm){menu="camera"}
         }
@@ -133,7 +138,8 @@ private fun FieldMonitorBody(vm:MonitorViewModel){
         val portrait=maxHeight>maxWidth
         val controlsWidth=maxWidth
         val railCellHeight=((maxHeight-88.dp)/6).coerceAtMost(64.dp)
-        if(clean)preview()
+        if(measuring)preview()
+        else if(clean)preview()
         else if(portrait){
             Column(Modifier.fillMaxSize()){
                 Row(Modifier.fillMaxWidth().height(58.dp).padding(horizontal=6.dp),verticalAlignment=Alignment.CenterVertically){
@@ -152,7 +158,7 @@ private fun FieldMonitorBody(vm:MonitorViewModel){
                     Setting(SettingKind.ISO,"ISO",vm.observedSettings.iso,true,controlsWidth/5)
                     Setting(SettingKind.SHUTTER,"Затвор",vm.observedSettings.shutter,true,controlsWidth/5)
                     Setting(SettingKind.APERTURE,"Диафр.",vm.observedSettings.aperture,true,controlsWidth/5)
-                    Setting(SettingKind.WHITE_BALANCE,"ББ",compactWb(vm.settings.whiteBalance),true,controlsWidth/5)
+                    Setting(SettingKind.WHITE_BALANCE,"ББ",compactWb(vm.whiteBalanceText),true,controlsWidth/5)
                     Setting(SettingKind.EXPOSURE,"EV",vm.settings.exposureComp,true,controlsWidth/5)
                 }
                 Row(Modifier.fillMaxWidth().height(88.dp).padding(horizontal=12.dp),verticalAlignment=Alignment.CenterVertically){
@@ -187,7 +193,7 @@ private fun FieldMonitorBody(vm:MonitorViewModel){
                     }
                     ShutterButton(vm,Modifier.fillMaxWidth())
                     Column(Modifier.weight(1f).fillMaxWidth(),verticalArrangement=Arrangement.SpaceEvenly){
-                        Setting(SettingKind.WHITE_BALANCE,"ББ",compactWb(vm.settings.whiteBalance),height=cellHeight)
+                        Setting(SettingKind.WHITE_BALANCE,"ББ",compactWb(vm.whiteBalanceText),height=cellHeight)
                         Setting(SettingKind.EXPOSURE,"EV",vm.settings.exposureComp,height=cellHeight)
                         Rail("Лупа GH5",assistLabel,vm.focusAssistActive,enabled=!vm.assistPending,cellHeight=cellHeight){vm.toggleFocusAssist()}
                     }
@@ -196,11 +202,12 @@ private fun FieldMonitorBody(vm:MonitorViewModel){
         }
         if(captureNotice && !clean)Text(vm.captureFeedback,color=Color.White,fontSize=12.sp,modifier=Modifier.align(Alignment.TopCenter).padding(top=if(portrait)106.dp else 8.dp).background(Panel.copy(alpha=.92f),RoundedCornerShape(5.dp)).padding(9.dp))
         if(vm.isWifi && vm.wifi.gallery)WifiGalleryPanel(vm)
-        if(menu=="value" && selectedSetting!=null && !clean){
+        if(menu=="value" && selectedSetting!=null && !clean && !measuring){
             Box(Modifier.fillMaxSize().clickable(interactionSource=remember{androidx.compose.foundation.interaction.MutableInteractionSource()},indication=null){menu=null})
-            SettingWheelEditor(vm,selectedSetting!!,Modifier.align(Alignment.BottomCenter).widthIn(max=520.dp).fillMaxWidth(),
+            SettingWheelEditor(vm,selectedSetting!!,Modifier.align(Alignment.BottomCenter).widthIn(max=520.dp).fillMaxWidth().heightIn(max=maxHeight),
                 chooseKind={selectedSetting=it},close={menu=null})
         }
+        if(measuring)WhiteSetScreen(vm,Modifier.fillMaxSize())
         if(menu!=null && menu!="value" && !clean){
             Box(Modifier.fillMaxSize().background(Color.Black.copy(alpha=.3f)).clickable{menu=null})
             val panelModifier=if(portrait)Modifier.align(Alignment.BottomCenter).fillMaxWidth().fillMaxHeight(.8f) else Modifier.align(Alignment.CenterStart).width(360.dp).fillMaxHeight()
@@ -358,16 +365,18 @@ private fun ChoiceRow(items:List<Pair<String,Float>>,selected:Float,choose:(Floa
 @Composable
 private fun CameraViewport(vm:MonitorViewModel,bitmap:Bitmap,allowTouchAf:Boolean,onTap:()->Unit,onLongPress:()->Unit){
     val tools=vm.tools
+    val measuring=vm.remoteControl.whiteBalanceMeasuring && !vm.isWifi
     val latestTap by rememberUpdatedState(onTap)
     val touchAfAllowed by rememberUpdatedState(allowTouchAf)
     val latestLongPress by rememberUpdatedState(onLongPress)
     var bounds by remember{mutableStateOf(IntSize(1,1))}
     val density=LocalDensity.current
     BoxWithConstraints(Modifier.fillMaxSize(),contentAlignment=Alignment.Center){
-        val fit=with(density){ImageGeometry.fit(maxWidth.toPx().coerceAtLeast(1f),maxHeight.toPx().coerceAtLeast(1f),bitmap.width,bitmap.height,tools.desqueeze,vm.nativePixels,vm.previewQuarterTurns)}
+        val fit=with(density){ImageGeometry.fit(maxWidth.toPx().coerceAtLeast(1f),maxHeight.toPx().coerceAtLeast(1f),bitmap.width,bitmap.height,if(measuring)1f else tools.desqueeze,vm.nativePixels && !measuring,vm.previewQuarterTurns)}
         val width=with(density){fit.width.toDp()};val height=with(density){fit.height.toDp()}
         Box(Modifier.size(width,height).onSizeChanged{bounds=it}
-            .pointerInput(Unit){detectTapGestures(onTap={p->
+            .pointerInput(measuring){detectTapGestures(onTap={p->
+                if(measuring)return@detectTapGestures
                 if(touchAfAllowed && vm.selectingAssist){
                     val point=ImageGeometry.sensorPoint(p.x/bounds.width.coerceAtLeast(1),p.y/bounds.height.coerceAtLeast(1),vm.previewQuarterTurns)
                     vm.startFocusAssistAt((point.first*1000).toInt(),(point.second*1000).toInt())
@@ -375,8 +384,9 @@ private fun CameraViewport(vm:MonitorViewModel,bitmap:Bitmap,allowTouchAf:Boolea
                     val point=ImageGeometry.sensorPoint(p.x/bounds.width.coerceAtLeast(1),p.y/bounds.height.coerceAtLeast(1),vm.previewQuarterTurns)
                     vm.pointFocus(point.first,point.second)
                 }else latestTap()
-            },onLongPress={latestLongPress()},onDoubleTap={if(vm.isWifi && vm.heldFrame==null)vm.toggleFocusAssist() else {if(vm.nativePixels)vm.toggleNativePixels();vm.setTransform(if(vm.viewTransform.zoom>1f)1f else 2f)}})}
-            .pointerInput(fit.nativeZoom){detectTransformGestures{_,pan,zoom,_->
+            },onLongPress={latestLongPress()},onDoubleTap={if(!measuring){if(vm.isWifi && vm.heldFrame==null)vm.toggleFocusAssist() else {if(vm.nativePixels)vm.toggleNativePixels();vm.setTransform(if(vm.viewTransform.zoom>1f)1f else 2f)}}})}
+            .pointerInput(fit.nativeZoom,measuring){detectTransformGestures{_,pan,zoom,_->
+                if(measuring)return@detectTransformGestures
                 if(vm.isWifi && vm.focusAssistActive){
                     val a=vm.wifi.assist
                     if(abs(zoom-1f)>.05f)vm.wifi.stepAssist(zoom>1f)
@@ -390,8 +400,18 @@ private fun CameraViewport(vm:MonitorViewModel,bitmap:Bitmap,allowTouchAf:Boolea
                 val old=vm.viewTransform;val z=(old.zoom*zoom).coerceIn(1f,8f)
                 vm.setTransform(z,old.panX-pan.x/bounds.width/z/fit.nativeZoom,old.panY-pan.y/bounds.height/z/fit.nativeZoom,fit.nativeZoom)
             }}){
-            AndroidView(factory={MonitorGlView(it)},update={it.display(bitmap,vm.previewTools,vm.viewTransform.copy(zoom=vm.viewTransform.zoom*fit.nativeZoom),vm.viewingLut,vm.previewCalibration,vm.previewQuarterTurns)},modifier=Modifier.fillMaxSize())
+            AndroidView(factory={MonitorGlView(it)},update={it.display(bitmap,vm.previewTools,if(measuring)com.lumixmonitor.monitor.ViewTransform() else vm.viewTransform.copy(zoom=vm.viewTransform.zoom*fit.nativeZoom),vm.viewingLut,vm.previewCalibration,vm.previewQuarterTurns)},modifier=Modifier.fillMaxSize())
             Canvas(Modifier.fillMaxSize()){
+                if(measuring){
+                    val region=WhiteBalanceRegion.center(bitmap.width,bitmap.height)
+                    val a=ImageGeometry.screenPoint(region.left.toFloat()/bitmap.width,region.top.toFloat()/bitmap.height,vm.previewQuarterTurns)
+                    val b=ImageGeometry.screenPoint((region.left+region.width).toFloat()/bitmap.width,(region.top+region.height).toFloat()/bitmap.height,vm.previewQuarterTurns)
+                    val top=Offset(minOf(a.first,b.first)*size.width,minOf(a.second,b.second)*size.height)
+                    val area=Size(abs(a.first-b.first)*size.width,abs(a.second-b.second)*size.height)
+                    drawRect(Color.Black.copy(alpha=.8f),top,area,style=Stroke(4.dp.toPx()))
+                    drawRect(WbAccent,top,area,style=Stroke(2.dp.toPx()))
+                    return@Canvas
+                }
                 fun guide(a:Offset,b:Offset){drawLine(Color.Black.copy(alpha=.65f),a,b,2.dp.toPx());drawLine(Color.White.copy(alpha=.65f),a,b,.6.dp.toPx())}
                 val completeFrame=vm.viewTransform.zoom<=1f && fit.nativeZoom<=1f
                 if(completeFrame && !vm.focusAssistActive)vm.focusPoint?.let { target ->

@@ -1,6 +1,6 @@
 # User guide
 
-This guide describes 0.5.3-gh5. Documentation is English; current app labels are Russian, shown below where useful.
+This guide describes the USB monitor, including the marked 0.7.2 development features. Documentation is English; current app labels are Russian, shown below where useful.
 
 For experimental Wi-Fi support on the 0.6.0 branch, see [Wi-Fi setup and controls](WIFI.md). USB instructions below continue to apply.
 
@@ -15,6 +15,25 @@ If the camera is busy or the stream stops, give recovery a moment. Use **Мен�
 The central circular control on the right in landscape, or at the bottom in portrait, is the shutter. The action follows the camera's operating mode: still capture or movie start. When recent camera telemetry confirms recording, the control changes to a red **Стоп** (Stop) button. It is not a phone screenshot button.
 
 ISO, shutter, aperture, white balance and EV open scrolling setting selectors. Values come from the camera's supported choices, subject to its current mode. Unknown or unavailable camera information should not be interpreted as a real exposure value.
+
+### USB white balance (development branch)
+
+Tap **ББ** on the main monitor to open the USB white-balance editor:
+
+- **Пресеты** (Presets) contains only camera-reported automatic WB and named lighting presets. K and custom-reference slots are in their own sections. Vector symbols follow the GH5 vocabulary, with yellow outlines indicating the selected camera setting.
+- **Кельвины** (Kelvin) selects K1–K4 and adjusts the selected slot using the camera's reported temperature choices. GH5 specifies 2500–10000 K in 100 K steps. The current K value is also shown in the main WB control when it has been read for that same slot.
+- **Замер** (Measure) selects WB1–WB4. **White Set · Измерить…** opens a dedicated reference view with a yellow center guide after confirming that cell on GH5. Fill the guide with a neutral white/gray reference under the shooting light, then press **SET · Измерить и записать** (Measure and store). Native START/SAMPLE begins only on SET and can replace the selected reference. Entering the view does not sample. **Назад** or Android Back returns to WB selection; Back is disabled during an in-flight sample.
+- **Подстройка ›** (Fine adjustment), below the selectors, belongs to the displayed active mode rather than being a fourth WB family. Its separate screen is titled with that mode. The grid has A left, B right, G above and M below. Tap or drag, or press **Центр** (Center) to reset both axes. Positive A/B means blue and positive G/M means green on the tested GH5. These are camera settings, not a phone viewing filter. Automatic and named presets do not become fixed-K modes; choose a K slot for numeric temperature.
+
+The yellow White Set guide covers approximately the central third of the source image along each axis and follows manual preview rotation. It is a visual reference inferred from the native screen, not a camera-reported sensor ROI. Brightness sampling uses this same displayed region, bounded to 65,536 pixels. White Set temporarily shows fresh live frames without phone LUT, viewing correction, digital display zoom, peaking, zebra or framing overlays; saved viewing settings are retained. Standard controls return after exit. Source-side camera processing remains present. Panasonic's [GH5 manual, White Balance section](https://help.na.panasonic.com/wp-content/uploads/2023/02/DCGH5_DVQP1117ZA_ENG.pdf) describes the native reference / color-temperature / fine-adjustment workflow.
+
+The app validates the selected WB mode again before queued fine adjustments and sampling. Sampling requires recording-off telemetry and a confirmed cell selection. Selection/readback/START/SAMPLE run as one exclusive sequence, followed by a 1.8-second processing interval without live-view/telemetry requests. This interval may visibly pause the reference view. Successful command submission does not trigger a timed END. Changing WB on the body outside an in-flight sample clears the old reference state. Explicit cancellation or command rejection can issue END; an already-closed END reply is treated as closed. No automatic sampling retry is sent.
+
+**Known unresolved issue:** a brighter WB1 sample detached USB on the tested GH5. A dark, camera-rejected sample retained WB1 and the connection. The final processing interval has not yet been verified against a successful sample, and correct calibration storage in every cell remains unproven. After an interrupted operation, treat both the result and storage cell as unconfirmed, even if a cell is selected on reconnect. Re-select PC(Tether) on the camera if it is no longer enumerated. Do not interpret command acceptance as successful calibration.
+
+The measurement page estimates central brightness from the uncorrected decoded USB preview, with dark/clipped warnings. This is a JPEG viewing estimate, not a calibrated camera meter, detection of a neutral card or an exact prediction of GH5's white-set limits. The camera's asynchronous white-set failure event is also shown. Its precise reason is not decoded: insufficient light is a possible cause, not an invented camera error code. A command acknowledgement, or absence of a failure event during the short wait, does not prove accurate color calibration. These new controls are USB-only; the Wi-Fi implementation is unchanged.
+
+The main USB mode readout uses the existing dial-position property and, for Creative Video, the reported movie exposure program: **Видео M/A/S/P**. It does not change the physical dial. Camera events trigger coalesced refreshes rather than a full per-frame settings poll.
 
 **PK**, **Z** and **Трети** (Thirds) switch app peaking, zebra and grid independently. They can be enabled together. **AF** triggers autofocus. **MF / Лупа GH5** opens native camera MF Assist.
 

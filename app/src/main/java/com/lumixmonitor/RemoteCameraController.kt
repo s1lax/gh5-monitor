@@ -53,6 +53,15 @@ class RemoteCameraController(
     var downloadedUri by mutableStateOf<Uri?>(null); private set
     var downloadedMime by mutableStateOf("image/jpeg"); private set
     var feedback by mutableStateOf(""); private set
+    var whiteBalanceMeasuring by mutableStateOf(false); private set
+    var whiteBalanceBusy by mutableStateOf(false); private set
+    var whiteBalanceWarning by mutableStateOf("");private set
+    private var whiteBalanceCamera:LumixCamera?=null
+    private var whiteBalanceSlot:Int?=null
+    private var whiteBalanceSampling=false
+    private val wbMeasurementEpoch=AtomicLong()
+    private val wbFailureCount=AtomicLong()
+    private val wbShiftWrites=AtomicLong()
 
     private fun post(token:Long,cam:LumixCamera,block:()->Unit){main.post{if(!disposed && valid(token) && camera()===cam)block()}}
     private fun message(text:String){feedback=text;show(text)}
@@ -65,11 +74,15 @@ class RemoteCameraController(
     fun set(setting:RemoteSetting,value:Int){
         val token=epoch();val p=properties[setting.code] ?: return
         if(value !in p.choices)return
+        val wbMode=if(setting.section=="ББ")properties[LumixProp.WHITE_BALANCE_PARAM]?.current else null
         val serial=writes.computeIfAbsent(setting.code){AtomicLong()};val request=serial.incrementAndGet()
         io.schedule({
             if(!valid(token) || serial.get()!=request)return@schedule
             val cam=camera() ?: return@schedule
             try{
+                if(setting.section=="ББ" && (whiteBalanceCamera!=null || wbMode==null || cam.getDevicePropDesc(LumixProp.WHITE_BALANCE,2)?.current!=wbMode)){
+                    requestRefresh();post(token,cam){message("ББ изменился на камере — дождитесь обновления шкалы")};return@schedule
+                }
                 val ok=cam.remote.setProperty(p,value)
                 val next=if(ok)cam.remote.capabilities(cam.deviceInfo?.model) else null
                 post(token,cam){
@@ -83,6 +96,115 @@ class RemoteCameraController(
                 }
             }catch(t:Throwable){post(token,cam){message("${setting.label}: ${t.message}")}}
         },140,TimeUnit.MILLISECONDS)
+    }
+
+    fun beginWhiteBalanceMeasurement(expectedMode:Int){
+        if(whiteBalanceBusy || whiteBalanceMeasuring)return
+        val token=epoch();val cam=camera() ?: return;whiteBalanceBusy=true;whiteBalanceWarning=""
+        val seq=wbMeasurementEpoch.incrementAndGet()
+        io.execute{
+            try{
+                if(!valid(token) || camera()!==cam || wbMeasurementEpoch.get()!=seq)return@execute
+                require(UsbWhiteBalance.isCustom(expectedMode)){"Выберите WB1–WB4 для замера белого"}
+                require(cam.remote.telemetry(false,false).recording==false){"Для замера остановите запись GH5"}
+                check(cam.setWhiteBalance(expectedMode)){"Не удалось выбрать ячейку WB"}
+                check(cam.getDevicePropDesc(LumixProp.WHITE_BALANCE,2)?.current==expectedMode){"Выбранная ячейка не подтверждена — замер не открыт"}
+                whiteBalanceCamera=cam;whiteBalanceSlot=expectedMode;whiteBalanceSampling=false
+                PtpLog.add("WB reference ready: slot=${UsbWhiteBalance.slot(expectedMode)}")
+                post(token,cam){whiteBalanceMeasuring=true;message("Наведите рамку на белый / серый эталон. SET запишет WB${UsbWhiteBalance.slot(expectedMode)}.")}
+            }catch(t:Throwable){post(token,cam){message(t.message ?: "Замер ББ недоступен")}}
+            finally{post(token,cam){whiteBalanceBusy=false}}
+        }
+    }
+    fun sampleWhiteBalance(){
+        if(whiteBalanceBusy || !whiteBalanceMeasuring)return
+        val token=epoch();val cam=whiteBalanceCamera ?: return;val mode=whiteBalanceSlot ?: return;whiteBalanceBusy=true
+        val seq=wbMeasurementEpoch.incrementAndGet();val failureBefore=wbFailureCount.get()
+        io.execute{
+            try{
+                if(!valid(token) || camera()!==cam || wbMeasurementEpoch.get()!=seq)return@execute
+                require(cam.getDevicePropDesc(LumixProp.WHITE_BALANCE,2)?.current==mode){"Ячейка ББ изменилась — замер не отправлен"}
+                require(cam.remote.telemetry(false,false).recording==false){"Для замера остановите запись GH5"}
+                whiteBalanceSampling=true
+                PtpLog.add("WB sample requested: slot=${UsbWhiteBalance.slot(mode)}")
+                cam.captureWhiteBalance(mode)
+                post(token,cam){message("WB${UsbWhiteBalance.slot(mode)}: ожидание результата GH5…")}
+                io.schedule({
+                    if(!valid(token) || camera()!==cam || wbMeasurementEpoch.get()!=seq)return@schedule
+                    // Successful submission is self-completing on GH5; do not send timed END.
+                    val actual=runCatching{cam.getDevicePropDesc(LumixProp.WHITE_BALANCE,2)?.current}.getOrNull()
+                    whiteBalanceCamera=null;whiteBalanceSlot=null;whiteBalanceSampling=false
+                    PtpLog.add("WB sample settled: requested=${UsbWhiteBalance.slot(mode)} actual=${actual?.let{if(UsbWhiteBalance.isCustom(it))UsbWhiteBalance.slot(it) else it}} failed=${wbFailureCount.get()!=failureBefore}")
+                    requestRefresh()
+                    post(token,cam){whiteBalanceMeasuring=false;whiteBalanceBusy=false
+                        if(actual!=mode)whiteBalanceWarning="Результат WB${UsbWhiteBalance.slot(mode)} не подтверждён: после замера камера не сообщила ту же ячейку."
+                        message(if(wbFailureCount.get()!=failureBefore)"GH5: замер ББ не удался. Проверьте освещение и нейтральный эталон. Можно повторить вход."
+                            else if(actual!=mode)"GH5 вернула другую ячейку после замера. Результат WB${UsbWhiteBalance.slot(mode)} не подтверждён."
+                            else "Команда замера WB${UsbWhiteBalance.slot(mode)} принята; сообщения об ошибке не получено. Проверьте результат на GH5.")}
+                },300,TimeUnit.MILLISECONDS)
+            }catch(t:Throwable){
+                val interrupted=whiteBalanceSampling && (t is com.lumixmonitor.ptp.PtpException || t is com.lumixmonitor.ptp.PtpTimeoutException)
+                // captureSelected already attempted native cleanup after a rejected START/SAMPLE.
+                whiteBalanceCamera=null;whiteBalanceSlot=null;whiteBalanceSampling=false
+                post(token,cam){whiteBalanceMeasuring=false;whiteBalanceBusy=false
+                    if(interrupted)whiteBalanceWarning="Связь прервалась во время замера WB${UsbWhiteBalance.slot(mode)}. Результат и ячейка записи не подтверждены."
+                    message(if(interrupted)whiteBalanceWarning else t.message ?: "Ошибка замера ББ")}
+            }
+        }
+    }
+    fun whiteBalanceFailure(){
+        wbFailureCount.incrementAndGet()
+        val token=epoch();val cam=camera() ?: return
+        post(token,cam){message("GH5: замер ББ не удался. Возможно, мало света или эталон вне области замера.")}
+    }
+    /** Invoked only after a fresh WB property read, on the serialized USB worker. */
+    fun observeWhiteBalanceMode(mode:Int){
+        if(whiteBalanceCamera==null || whiteBalanceSlot==mode || whiteBalanceSampling)return
+        val cam=whiteBalanceCamera ?: return;val token=epoch();wbMeasurementEpoch.incrementAndGet()
+        runCatching{endWhiteBalanceMeasurement(cam)}
+        whiteBalanceCamera=null;whiteBalanceSlot=null
+        post(token,cam){whiteBalanceMeasuring=false;whiteBalanceBusy=false;message("ББ переключён на камере. Для нового замера нажмите «Войти в замер ББ».")}
+    }
+    fun setWhiteBalanceShift(ab:Int,gm:Int){
+        if(ab !in -9..9 || gm !in -9..9)return
+        val token=epoch();val mode=properties[LumixProp.WHITE_BALANCE_PARAM]?.current ?: return
+        val a=properties[0x02000053] ?: return;val g=properties[0x02000054] ?: return
+        val aa=UsbWhiteBalance.encodeShift(ab);val gg=UsbWhiteBalance.encodeShift(gm)
+        if(aa !in a.choices || gg !in g.choices)return
+        val seq=wbShiftWrites.incrementAndGet()
+        writes.computeIfAbsent(a.code){AtomicLong()}.incrementAndGet();writes.computeIfAbsent(g.code){AtomicLong()}.incrementAndGet()
+        io.schedule({
+            if(!valid(token) || wbShiftWrites.get()!=seq)return@schedule
+            val cam=camera() ?: return@schedule
+            try{
+                require(whiteBalanceCamera==null && cam.getDevicePropDesc(LumixProp.WHITE_BALANCE,2)?.current==mode){"ББ изменился — дождитесь обновления сетки"}
+                check(cam.remote.setProperty(a,aa)){"GH5 отклонила подстройку A/B"}
+                require(cam.getDevicePropDesc(LumixProp.WHITE_BALANCE,2)?.current==mode){"Режим ББ сменился во время подстройки"}
+                check(cam.remote.setProperty(g,gg)){"GH5 отклонила подстройку G/M"}
+                val next=cam.remote.whiteBalanceCapabilities(cam.deviceInfo?.model)
+                post(token,cam){if(wbShiftWrites.get()==seq){properties=properties+next
+                    message(if(next[a.code]?.current==aa && next[g.code]?.current==gg)"Подстройка ББ подтверждена камерой" else "GH5 вернула другую подстройку — сетка обновлена")}}
+            }catch(t:Throwable){requestRefresh();post(token,cam){message(t.message ?: "Ошибка подстройки ББ")}}
+        },140,TimeUnit.MILLISECONDS)
+    }
+    fun cancelWhiteBalanceMeasurement(){
+        if(!whiteBalanceMeasuring && !whiteBalanceBusy)return
+        wbMeasurementEpoch.incrementAndGet()
+        val token=epoch();val cam=camera() ?: return
+        io.execute{
+            if(!valid(token) || camera()!==cam)return@execute
+            try{
+                val ok=endWhiteBalanceMeasurement(cam)
+                post(token,cam){if(ok){whiteBalanceMeasuring=false;message("Замер закрыт")}else message("GH5 не подтвердила выход из замера — повторите закрытие");whiteBalanceBusy=false;requestRefresh()}
+            }catch(t:Throwable){post(token,cam){whiteBalanceBusy=false;message("Выход из замера: ${t.message}")}}
+        }
+    }
+    /** Called on the USB worker before a graceful session close as well as by the editor. */
+    fun endWhiteBalanceMeasurement(cam:LumixCamera):Boolean {
+        if(whiteBalanceCamera!==cam)return true
+        val ok=if(whiteBalanceSampling)cam.remote.whiteBalanceMeasure(UsbWhiteBalance.END) else true
+        if(ok){whiteBalanceCamera=null;whiteBalanceSlot=null;whiteBalanceSampling=false}
+        return ok
     }
 
     private fun focus(label:String,action:(LumixCamera)->Boolean,accepted:()->Unit={}){
@@ -204,6 +326,9 @@ class RemoteCameraController(
         }catch(t:Throwable){PtpLog.add("Телеметрия GH5: ${t.message}")}
     },1200,1000,TimeUnit.MILLISECONDS)
 
-    fun reset(){previousCamera=null;refreshWanted=true;properties=emptyMap();telemetry=CameraTelemetry();focusBusy=false;filesLoading=false;focusTarget=null;assistTarget=savedAssist();pickAssistArea=null;files=emptyList();filesChanged=false}
+    fun reset(){
+        if(whiteBalanceSampling)whiteBalanceSlot?.let{slot->main.post{if(!disposed){whiteBalanceWarning="Связь прервалась во время замера WB${UsbWhiteBalance.slot(slot)}. Результат и ячейка записи не подтверждены.";message(whiteBalanceWarning)}}}
+        wbMeasurementEpoch.incrementAndGet();wbShiftWrites.incrementAndGet();previousCamera=null;refreshWanted=true;properties=emptyMap();telemetry=CameraTelemetry();focusBusy=false;filesLoading=false;focusTarget=null;assistTarget=savedAssist();pickAssistArea=null;files=emptyList();filesChanged=false;whiteBalanceCamera=null;whiteBalanceSlot=null;whiteBalanceSampling=false;whiteBalanceMeasuring=false;whiteBalanceBusy=false
+    }
     fun close(){disposed=true;polling.cancel(false);fileIo.shutdownNow()}
 }

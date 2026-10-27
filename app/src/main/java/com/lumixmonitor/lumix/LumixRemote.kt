@@ -26,6 +26,8 @@ class LumixRemote(private val transport: PtpUsbTransport) {
     fun capabilities(model:String?=null):Map<Int,CameraProperty> = Gh5Compatibility.settings(model,buildMap {
         RemoteSetting.groups.forEach { code -> read(0x9108,intArrayOf(code))?.let { putAll(CameraPropertyParser.parse(it)) } }
     })
+    fun whiteBalanceCapabilities(model:String?):Map<Int,CameraProperty> = Gh5Compatibility.settings(model,
+        read(0x9108,intArrayOf(LumixProp.WHITE_BALANCE))?.let(CameraPropertyParser::parse).orEmpty())
     fun telemetry(battery:Boolean,lens:Boolean):CameraTelemetry {
         fun get(op:Int,code:Int)=read(op,intArrayOf(code)) ?: byteArrayOf()
         val t=CameraTelemetryParser.parse(get(0x9414,0x12000010),get(0x9414,0x12000020),
@@ -46,6 +48,12 @@ class LumixRemote(private val transport: PtpUsbTransport) {
         val r=transport.sendData(RemoteSetting.writeOpcode(p.code),intArrayOf(p.code),payload,soft)
         PtpLog.add("Настройка 0x%08X=%d: %s".format(p.code,value,PtpResponseCode.name(r.resCode)))
         return r.isOk
+    }
+    fun whiteBalanceMeasure(code:Int):Boolean {
+        val payload=UsbWhiteBalance.payload(code)
+        val r=transport.sendData(0x9416,intArrayOf(code),payload,soft)
+        PtpLog.add("WB measure 0x%08X: %s".format(code,PtpResponseCode.name(r.resCode)))
+        return UsbWhiteBalance.accepted(code,r.resCode)
     }
     private fun control(code:Int,values:IntArray):Boolean {
         require(code in setOf(0x03000026,0x03000052,0x03000053,0x03010011))

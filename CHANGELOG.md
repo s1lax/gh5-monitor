@@ -2,6 +2,31 @@
 
 This is the first public GH5-focused release. Earlier version entries summarize the local development iterations; separate public release binaries are not provided for every historical version.
 
+## 0.7.2-gh5 — WB capture guards (experimental; detach unresolved)
+
+- Confirm the requested custom-WB cell before entering the reference view and again immediately before capture. Disable measurement while a WB selection is pending.
+- Serialize selection, readback, START and SAMPLE against live-view requests. Remove redundant entry/restart commands and the timed END after successful submission; END remains cancellation/error cleanup.
+- Add a bounded 1.8-second exclusive processing interval after SAMPLE, preventing live-view/telemetry requests during that interval. This last mitigation still needs a successful native measurement test.
+- Keep an unconfirmed-result warning after an interrupted capture; do not silently report a different selected cell as success. Separate the slot digit from the WB vector symbol to avoid overlap.
+- Add an optional debug-only, serial-matched, expiring one-shot ISO/WB-selection rollback for interrupted local hardware tests. No rollback job ships in the APK.
+- Hardware testing still reproduced a USB detach on a brighter WB1 sample before the processing interval was added. Native measurement is not marked fixed.
+
+## 0.7.1-gh5 — Camera-style USB white balance (in development)
+
+- Split WB selection into presets, K1–K4 temperatures and WB1–WB4 custom references. Use familiar vector WB symbols and yellow selection accents; keep fine adjustment as a separate action labelled with the active mode and any reported shift.
+- Open native measurement in a dedicated White Set view with a central yellow reference guide, live preview, SET and Back. Remove the large settings panel and other guide overlays while measuring.
+- Estimate brightness over the displayed reference guide with bounded sampling. The guide approximates the camera's central area; its exact sensor ROI is not reported over USB.
+- Temporarily bypass phone viewing corrections, held frames and display zoom during measurement while retaining their saved settings. Keep preview rotation independent of UI orientation.
+
+## 0.7.0-gh5 — USB white-balance editor (in development)
+
+- Add main-screen USB WB tabs for presets, K1–K4 temperatures, a camera-style A/B–G/M grid and native WB1–WB4 measurement.
+- Read camera-reported temperature choices and show Kelvin only when it belongs to the selected K slot. Coalesce grid writes, validate WB mode around axis writes and read back both axes.
+- Add native measurement entry, explicit sampling and exit; reset stale state after camera WB changes, re-enter before sampling and handle already-closed END responses.
+- Surface GH5's asynchronous white-set failure event and a clearly labelled central-JPEG brightness estimate, without claiming an exact camera failure reason or changing exposure automatically.
+- Show the Creative Video P/A/S/M exposure subtype on the USB status readout. Existing dial events remain the refresh source.
+- Keep Wi-Fi, image processing, peaking and zebra unchanged.
+
 ## 0.6.3-gh5 — Faster Wi-Fi mode updates (in development)
 
 - Refresh the current menu on every foreground supervisor poll instead of every fifth poll. Publish the mode before the slower lens-setting reads.
